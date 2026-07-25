@@ -1,0 +1,219 @@
+{% extends "base.html" %}
+
+{% block title %}Wyniki wyborów — Selectio Positiva{% endblock %}
+
+{% block content %}
+<section class="results-hero">
+  <p class="eyebrow">Metoda Schulzego · beatpath</p>
+  <h1>Wyniki wyborów</h1>
+  <p class="lede">Wybierz urząd i okręg wyborczy. Liczba mandatów jest właściwością okręgu.</p>
+</section>
+
+<section class="results-layout">
+  <aside class="results-filters">
+    <form method="get" class="filter-form" id="results-filter-form">
+      <label class="field">
+        <span>Poziom terytorialny</span>
+        <select name="kind" id="filter-kind">
+          <option value="">Wszystkie poziomy</option>
+          {% for value, label in kind_choices %}
+          <option value="{{ value }}" {% if kind == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <label class="field">
+        <span>Jednostka</span>
+        <select name="unit" id="filter-unit">
+          <option value="">Wszystkie jednostki</option>
+          {% for u in units %}
+          <option value="{{ u.pk }}" {% if selected_unit and selected_unit.pk == u.pk %}selected{% endif %}>
+            {{ u.get_kind_display }}: {{ u.name }}
+          </option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <label class="field">
+        <span>Urząd</span>
+        <select name="office" id="filter-office">
+          <option value="">Wybierz urząd…</option>
+          {% for o in offices %}
+          <option value="{{ o.slug }}" {% if selected_office and selected_office.slug == o.slug %}selected{% endif %}>
+            {{ o.name }}
+          </option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <label class="field">
+        <span>Okręg wyborczy</span>
+        <select name="district" id="filter-district">
+          <option value="">Wybierz okręg…</option>
+          {% for d in districts %}
+          <option value="{{ d.slug }}" {% if selected_district and selected_district.slug == d.slug %}selected{% endif %}>
+            {{ d.name }} ({{ d.seats_count }} mand.)
+          </option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <button type="submit" class="btn btn-primary btn-block">Pokaż wyniki</button>
+    </form>
+  </aside>
+
+  <div class="results-main">
+    <section class="map-section" aria-label="Mapa wyników">
+      <div class="map-legend" id="map-legend"></div>
+      <div id="results-map" class="election-map results-map"></div>
+      {{ map_payload_json|json_script:"results-map-payload" }}
+      <p class="hint map-hint">Kliknij obszar na mapie, aby odfiltrować okręgi powiązane z tą jednostką.</p>
+    </section>
+
+    {% if selected_district and result %}
+    <section class="result-panel">
+      <header class="section-head">
+        <h2>{{ selected_district.office.name }}</h2>
+        <p>
+          Okręg: <strong>{{ selected_district.name }}</strong>
+          · Liczba mandatów do obsadzenia: <strong>{{ seats_count }}</strong>
+          · {{ selected_district.territorial_unit.get_kind_display }}:
+          {{ selected_district.territorial_unit.name }}
+        </p>
+      </header>
+
+      <div class="turnout-card">
+        <div class="turnout-meta">
+          <strong>Frekwencja</strong>
+          <span>{{ turnout.ballots }} / {{ turnout.eligible_voters }} głosów uprawnionych</span>
+        </div>
+        <div class="turnout-bar" role="progressbar"
+             aria-valuemin="0" aria-valuemax="100"
+             aria-valuenow="{{ turnout.percent }}">
+          <div class="turnout-fill" style="width: {{ turnout.percent }}%"></div>
+        </div>
+        <span class="turnout-pct">{{ turnout.percent }}%</span>
+      </div>
+
+      <h3 class="results-subhead">Wybrani (pierwsze {{ seats_count }} miejsc)</h3>
+      <div class="table-wrap">
+        <table class="results-table">
+          <thead>
+            <tr>
+              <th>Miejsce</th>
+              <th>Kandydat</th>
+              <th>1. preferencje</th>
+              <th>Wygrane Schulzego</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in elected_rows %}
+            <tr class="is-winner">
+              <td>{{ row.place }}{% if row.is_tied_at_threshold %}*{% endif %}</td>
+              <td>{{ row.name }}</td>
+              <td>{{ row.first_preferences }}</td>
+              <td>{{ row.schulze_wins }}</td>
+              <td><span class="status status-done">{{ row.status }}</span></td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="5">Brak wybranych (za mało głosów / kandydatów).</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <h3 class="results-subhead">Pozostali kandydaci</h3>
+      <div class="table-wrap">
+        <table class="results-table">
+          <thead>
+            <tr>
+              <th>Miejsce</th>
+              <th>Kandydat</th>
+              <th>1. preferencje</th>
+              <th>Wygrane Schulzego</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in remaining_rows %}
+            <tr>
+              <td>{{ row.place }}{% if row.is_tied_at_threshold %}*{% endif %}</td>
+              <td>{{ row.name }}</td>
+              <td>{{ row.first_preferences }}</td>
+              <td>{{ row.schulze_wins }}</td>
+              <td><span class="status status-pending">{{ row.status }}</span></td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="5">Wszyscy kandydaci uzyskali mandat.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <p class="hint">* Remis na progu mandatowym (równa siła ścieżek p[A,B] = p[B,A]).</p>
+
+      <details class="pairwise-accordion">
+        <summary>Macierz pojedynków pairwise (d[A,B])</summary>
+        <div class="table-wrap pairwise-wrap">
+          <table class="pairwise-table">
+            <thead>
+              <tr>
+                <th>A \\ B</th>
+                {% for row in pairwise_grid %}
+                <th title="{{ row.name }}">{{ row.name|truncatechars:12 }}</th>
+                {% endfor %}
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in pairwise_grid %}
+              <tr>
+                <th title="{{ row.name }}">{{ row.name|truncatechars:16 }}</th>
+                {% for cell in row.cells %}
+                <td class="{% if cell.value is None %}cell-diag{% elif cell.win %}cell-win{% elif cell.value < cell.opp %}cell-lose{% endif %}">
+                  {% if cell.value is None %}—{% else %}{{ cell.value }}{% endif %}
+                </td>
+                {% endfor %}
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </details>
+    </section>
+    {% elif districts %}
+    <p class="empty">Wybierz okręg z listy lub kliknij obszar na mapie.</p>
+    <ul class="office-list compact">
+      {% for d in districts %}
+      <li class="office-row">
+        <div class="office-meta">
+          <h3>{{ d.office.name }}</h3>
+          <p class="office-scope">{{ d.name }} · mandaty: {{ d.seats_count }}</p>
+        </div>
+        <a class="btn btn-secondary"
+           href="{% url 'results' %}?kind={{ d.territorial_unit.kind }}&unit={{ d.territorial_unit_id }}&office={{ d.office.slug }}&district={{ d.slug }}">
+          Zobacz wynik
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="empty">Brak okręgów dla wybranego filtra.</p>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  document.addEventListener('DOMContentLoaded', () => {
+    const form = document.getElementById('results-filter-form');
+    ['filter-kind', 'filter-unit', 'filter-office', 'filter-district'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('change', () => form.requestSubmit());
+    });
+    if (window.SelectioResultsMap) {
+      window.SelectioResultsMap.init(document.getElementById('results-map'));
+    }
+  });
+</script>
+{% endblock %}

@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+
+{% block title %}Zmiana komisji — Selectio Positiva{% endblock %}
+
+{% block content %}
+<section class="settings-panel">
+  <p class="eyebrow"><a href="{% url 'dashboard' %}">← Panel</a></p>
+  <h1>Komisja wyborcza</h1>
+  <p class="lede">
+    {% if profile %}
+    Aktualnie: <strong>{{ profile.polling_station.name }}</strong>
+    ({{ profile.polling_station.code }}) · {{ profile.polling_station.address }}
+    {% else %}
+    Nie masz jeszcze przypisanej komisji — wybierz ją poniżej.
+    {% endif %}
+  </p>
+
+  <div class="ballot-summary-strip">
+    <span>Głosy aktywne: <strong>{{ ballot_counts.active }}</strong></span>
+    <span>Głosy zawieszone: <strong>{{ ballot_counts.voided }}</strong></span>
+  </div>
+
+  <form method="post" id="station-change-form" class="station-form" novalidate>
+    {% csrf_token %}
+    <input type="hidden" name="station_id" id="station-id-input" value="">
+
+    <label class="field">
+      <span>Województwo</span>
+      <select id="select-voivodeship">
+        <option value="">— wybierz —</option>
+      </select>
+    </label>
+
+    <label class="field">
+      <span>Jednostka terytorialna</span>
+      <select id="select-unit" disabled>
+        <option value="">— wybierz województwo —</option>
+      </select>
+    </label>
+
+    <label class="field">
+      <span>Komisja wyborcza</span>
+      <select id="select-station" disabled>
+        <option value="">— wybierz jednostkę —</option>
+      </select>
+    </label>
+
+    <p class="hint" id="station-address"></p>
+
+    <button type="button" class="btn btn-primary" id="btn-open-confirm" disabled>
+      Zmień komisję
+    </button>
+  </form>
+</section>
+
+<dialog class="confirm-modal" id="station-confirm-modal">
+  <form method="dialog" class="modal-card">
+    <h2>Potwierdź zmianę komisji</h2>
+    <p id="modal-warning" class="lede"></p>
+    <ul id="modal-void-list" class="modal-list"></ul>
+    <p id="modal-restore-note" class="hint" hidden></p>
+    <div class="form-actions">
+      <button type="submit" value="cancel" class="btn btn-ghost">Anuluj</button>
+      <button type="button" class="btn btn-primary" id="btn-confirm-change">Potwierdzam zmianę</button>
+    </div>
+  </form>
+</dialog>
+
+{{ station_tree_json|json_script:"station-tree" }}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  document.addEventListener('DOMContentLoaded', () => {
+    const tree = JSON.parse(document.getElementById('station-tree').textContent);
+    const voivSel = document.getElementById('select-voivodeship');
+    const unitSel = document.getElementById('select-unit');
+    const stationSel = document.getElementById('select-station');
+    const stationInput = document.getElementById('station-id-input');
+    const addressEl = document.getElementById('station-address');
+    const openBtn = document.getElementById('btn-open-confirm');
+    const form = document.getElementById('station-change-form');
+    const modal = document.getElementById('station-confirm-modal');
+    const modalWarning = document.getElementById('modal-warning');
+    const modalList = document.getElementById('modal-void-list');
+    const restoreNote = document.getElementById('modal-restore-note');
+    const confirmBtn = document.getElementById('btn-confirm-change');
+    const currentId = {{ current_station_id|default:'null' }};
+    const previewUrl = '{% url "preview_station_change" %}';
+
+    tree.forEach((v) => {
+      const opt = document.createElement('option');
+      opt.value = v.id;
+      opt.textContent = v.name;
+      voivSel.appendChild(opt);
+    });
+
+    function resetSelect(sel, placeholder, disabled) {
+      sel.innerHTML = '';
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = placeholder;
+      sel.appendChild(opt);
+      sel.disabled = !!disabled;
+    }
+
+    voivSel.addEventListener('change', () => {
+      const v = tree.find((x) => String(x.id) === voivSel.value);
+      resetSelect(unitSel, v ? '— wybierz —' : '— wybierz województwo —', !v);
+      resetSelect(stationSel, '— wybierz jednostkę —', true);
+      stationInput.value = '';
+      addressEl.textContent = '';
+      openBtn.disabled = true;
+      if (!v) return;
+      v.units.forEach((u) => {
+        const opt = document.createElement('option');
+        opt.value = u.id;
+        opt.textContent = u.name;
+        unitSel.appendChild(opt);
+      });
+    });
+
+    unitSel.addEventListener('change', () => {
+      const v = tree.find((x) => String(x.id) === voivSel.value);
+      const u = v && v.units.find((x) => String(x.id) === unitSel.value);
+      resetSelect(stationSel, u ? '— wybierz —' : '— wybierz jednostkę —', !u);
+      stationInput.value = '';
+      addressEl.textContent = '';
+      openBtn.disabled = true;
+      if (!u) return;
+      u.stations.forEach((s) => {
+        const opt = document.createElement('option');
+        opt.value = s.id;
+        opt.textContent = s.label;
+        if (currentId && Number(s.id) === Number(currentId)) {
+          opt.textContent += ' (aktualna)';
+        }
+        stationSel.appendChild(opt);
+      });
+    });
+
+    stationSel.addEventListener('change', () => {
+      const v = tree.find((x) => String(x.id) === voivSel.value);
+      const u = v && v.units.find((x) => String(x.id) === unitSel.value);
+      const s = u && u.stations.find((x) => String(x.id) === stationSel.value);
+      stationInput.value = s ? s.id : '';
+      addressEl.textContent = s ? s.address : '';
+      openBtn.disabled = !s || (currentId && Number(s.id) === Number(currentId));
+    });
+
+    openBtn.addEventListener('click', async () => {
+      const id = stationInput.value;
+      if (!id) return;
+      const res = await fetch(`${previewUrl}?station_id=${encodeURIComponent(id)}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.same_station) return;
+
+      const names = (data.offices_to_void || []).map((o) => o.name);
+      modalWarning.textContent =
+        `Zmiana komisji na „${data.station.name}” spowoduje zamrożenie Twoich głosów na urzędy: ` +
+        (names.length ? names.join(', ') : '(brak — wszystkie obecne głosy pozostaną aktywne)') +
+        '. Twoje głosy na te urzędy zostaną automatycznie przywrócone, jeśli wrócisz do poprzedniej komisji.';
+
+      modalList.innerHTML = '';
+      names.forEach((n) => {
+        const li = document.createElement('li');
+        li.textContent = n;
+        modalList.appendChild(li);
+      });
+
+      if ((data.offices_to_restore || []).length) {
+        restoreNote.hidden = false;
+        restoreNote.textContent =
+          'Przy tej zmianie zostaną też przywrócone wcześniej zawieszone głosy: ' +
+          data.offices_to_restore.map((o) => o.name).join(', ') + '.';
+      } else {
+        restoreNote.hidden = true;
+      }
+      modal.showModal();
+    });
+
+    confirmBtn.addEventListener('click', () => {
+      modal.close();
+      form.submit();
+    });
+  });
+</script>
+{% endblock %}

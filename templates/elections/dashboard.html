@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+
+{% block title %}Panel głosowania — Selectio Positiva{% endblock %}
+
+{% block content %}
+<section class="dashboard-hero">
+  <div>
+    <p class="eyebrow">Twój okręg wyborczy</p>
+    <h1>Panel głosowania</h1>
+    {% if profile %}
+    <p class="lede">
+      Komisja <strong>{{ profile.polling_station.name }}</strong>
+      ({{ profile.polling_station.code }}) · {{ profile.polling_station.address }}
+      · <a href="{% url 'change_station' %}">Zmień komisję</a>
+    </p>
+    <div class="ballot-summary-strip">
+      <span>Głosy aktywne: <strong>{{ ballot_counts.active }}</strong></span>
+      <span>Głosy zawieszone/unieważnione: <strong>{{ ballot_counts.voided }}</strong></span>
+    </div>
+    {% else %}
+    <p class="lede warn">Brak przypisanej komisji wyborczej.
+      <a href="{% url 'change_station' %}">Wybierz komisję</a>
+    </p>
+    {% endif %}
+  </div>
+</section>
+
+{% if station_summary %}
+<section class="flash flash-info station-summary-card">
+  <strong>Podsumowanie zmiany komisji</strong>
+  <p>Z {{ station_summary.previous }} → {{ station_summary.new }}</p>
+  <p>Głosy aktywne: {{ station_summary.active }} · Głosy zawieszone: {{ station_summary.voided }}</p>
+  {% if station_summary.voided_offices %}
+  <p>Zamrożone okręgi: {{ station_summary.voided_offices|join:", " }}</p>
+  {% endif %}
+  {% if station_summary.restored_offices %}
+  <p>Przywrócone okręgi: {{ station_summary.restored_offices|join:", " }}</p>
+  {% endif %}
+</section>
+{% endif %}
+
+{% if profile %}
+<section class="map-section" aria-label="Mapa terytorium wyborczego">
+  <div class="map-legend" id="map-legend"></div>
+  <div id="election-map" class="election-map"></div>
+  {{ map_payload_json|json_script:"map-payload" }}
+</section>
+
+<section class="offices-section">
+  <header class="section-head">
+    <h2>Dostępne karty do głosowania</h2>
+    <p>Okręgi wynikające z hierarchii Twojej komisji. Możesz zmienić głos w dowolnym momencie.</p>
+  </header>
+
+  {% if statuses %}
+  <ul class="office-list">
+    {% for item in statuses %}
+    <li class="office-row">
+      <div class="office-meta">
+        <h3>{{ item.district.office.name }}</h3>
+        <p class="office-scope">
+          {{ item.district.name }}
+          · {{ item.district.territorial_unit.get_kind_display }}:
+          {{ item.district.territorial_unit.name }}
+          · mandaty: {{ item.district.seats_count }}
+        </p>
+        {% if item.has_voted %}
+        <span class="status status-done">Głos oddany (możesz zmienić)</span>
+        {% else %}
+        <span class="status status-pending">Nie oddano głosu</span>
+        {% endif %}
+      </div>
+      <a class="btn {% if item.has_voted %}btn-secondary{% else %}btn-primary{% endif %}"
+         href="{% url 'vote_district' item.district.slug %}">
+        {% if item.has_voted %}Zmień ranking{% else %}Ułóż ranking{% endif %}
+      </a>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="empty">Brak otwartych wyborów dla Twojej komisji.</p>
+  {% endif %}
+</section>
+
+{% if voided_ballots %}
+<section class="offices-section voided-section">
+  <header class="section-head">
+    <h2>Głosy zawieszone</h2>
+    <p>Zamrożone po zmianie komisji. Wrócą automatycznie, gdy znów będziesz w zasięgu tych okręgów.</p>
+  </header>
+  <ul class="office-list">
+    {% for ballot in voided_ballots %}
+    <li class="office-row is-voided">
+      <div class="office-meta">
+        <h3>{{ ballot.district.office.name }}</h3>
+        <p class="office-scope">{{ ballot.district.name }}</p>
+        <span class="status status-void">Zawieszony{% if ballot.voided_at %} · {{ ballot.voided_at }}{% endif %}</span>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  document.addEventListener('DOMContentLoaded', () => {
+    if (window.SelectioMap) {
+      window.SelectioMap.init(document.getElementById('election-map'));
+    }
+  });
+</script>
+{% endblock %}

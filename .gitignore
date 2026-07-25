@@ -60,6 +60,9 @@ cover/
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
+/media/
+/staticfiles/
+*.sqlite3
 
 # Flask stuff:
 instance/
@@ -147,10 +150,10 @@ activemq-data/
 # SageMath parsed files
 *.sage.py
 
-# Environments
-.env
-.envrc
-.venv
+# Local data caches (PKW full dumps)
+/data/pkw/*.xlsx
+/data/pkw/*.zip
+/data/pkw/_tmp_*
 env/
 venv/
 ENV/

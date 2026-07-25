@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+
+{% block title %}{{ district.office.name }} — {{ district.name }}{% endblock %}
+
+{% block content %}
+<section class="vote-panel vote-panel-wide">
+  <p class="eyebrow">
+    <a href="{% url 'dashboard' %}">← Panel</a>
+    · {{ district.territorial_unit.get_kind_display }}: {{ district.territorial_unit.name }}
+    · mandaty: {{ district.seats_count }}
+  </p>
+  <h1>{{ office.name }}</h1>
+  <p class="lede"><strong>{{ district.name }}</strong>{% if office.description %} — {{ office.description }}{% endif %}</p>
+
+  <div class="vote-explain">
+    <p>
+      Kandydaci dodani do Twojego rankingu (miejsca 1, 2, 3…) wygrywają ze wszystkimi
+      pozostałymi kandydatami z tego okręgu. Pozostali kandydaci są traktowani jako
+      zremisowani na ostatnim miejscu.
+    </p>
+  </div>
+
+  <form method="post" id="ranking-form" class="ranking-form ballot-builder">
+    {% csrf_token %}
+
+    <div class="ballot-columns">
+      <section class="ballot-col ballot-pool" aria-label="Pula kandydatów">
+        <header class="ballot-col-head">
+          <h2>Dodaj kandydatów</h2>
+          <label class="search-field">
+            <span class="sr-only">Szukaj</span>
+            <input type="search" id="candidate-search" placeholder="Szukaj po imieniu lub nazwisku…"
+                   autocomplete="off">
+          </label>
+        </header>
+        <ul id="candidate-pool" class="candidate-pool">
+          {% for c in pool_candidates %}
+          <li class="pool-item" data-id="{{ c.pk }}"
+              data-name="{{ c.name|lower }}"
+              data-committee="{{ c.committee|lower }}">
+            <div class="candidate-body">
+              <strong>{{ c.name }}</strong>
+              {% if c.committee %}<span class="candidate-committee">{{ c.committee }}</span>{% endif %}
+              {% if c.bio %}<span class="candidate-bio">{{ c.bio }}</span>{% endif %}
+            </div>
+            <button type="button" class="btn btn-secondary btn-sm js-add-rank">+ Dodaj do mojego rankingu</button>
+          </li>
+          {% empty %}
+          <li class="empty pool-empty-msg">Wszyscy kandydaci są już w Twoim rankingu (lub brak listy).</li>
+          {% endfor %}
+        </ul>
+        <p class="empty pool-no-match" hidden>Brak wyników wyszukiwania.</p>
+      </section>
+
+      <section class="ballot-col ballot-rank" aria-label="Mój ranking">
+        <header class="ballot-col-head">
+          <h2>Mój ranking</h2>
+          <p class="hint">Przeciągnij, aby zmienić kolejność. 1 = najwyższa preferencja.</p>
+        </header>
+        <ol id="candidate-list" class="candidate-list" data-sortable>
+          {% for c in ranked_candidates %}
+          <li class="candidate-item" data-id="{{ c.pk }}">
+            <span class="rank-num" aria-hidden="true"></span>
+            <span class="drag-handle" title="Przeciągnij" aria-hidden="true">⋮⋮</span>
+            <div class="candidate-body">
+              <strong>{{ c.name }}</strong>
+              {% if c.committee %}<span class="candidate-committee">{{ c.committee }}</span>{% endif %}
+            </div>
+            <button type="button" class="btn btn-ghost btn-sm js-remove-rank" title="Usuń z rankingu">Usuń</button>
+            <input type="hidden" name="ranked_candidate_ids" value="{{ c.pk }}">
+          </li>
+          {% endfor %}
+        </ol>
+        <p class="empty rank-empty-msg" {% if ranked_candidates %}hidden{% endif %}>
+          Twój ranking jest pusty — dodaj kandydatów z listy po lewej.
+        </p>
+      </section>
+    </div>
+
+    {% if candidates %}
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary" id="btn-submit-ballot">
+        {% if is_update %}Zapisz zmianę głosu{% else %}Oddaj głos{% endif %}
+      </button>
+      <a href="{% url 'dashboard' %}" class="btn btn-ghost">Anuluj</a>
+    </div>
+    {% endif %}
+  </form>
+
+  {% if is_update %}
+  <form method="post" action="{% url 'clear_ballot' district.slug %}" class="danger-zone"
+        onsubmit="return confirm('Na pewno usunąć oddany głos?');">
+    {% csrf_token %}
+    <button type="submit" class="btn btn-danger-ghost">Usuń głos</button>
+  </form>
+  {% endif %}
+</section>
+
+{{ candidates_json|json_script:"candidates-data" }}
+{{ ranked_ids_json|json_script:"ranked-ids-data" }}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  document.addEventListener('DOMContentLoaded', () => {
+    if (window.SelectioBallot) {
+      window.SelectioBallot.init({
+        form: document.getElementById('ranking-form'),
+        pool: document.getElementById('candidate-pool'),
+        rankList: document.getElementById('candidate-list'),
+        search: document.getElementById('candidate-search'),
+        candidates: JSON.parse(document.getElementById('candidates-data').textContent),
+      });
+    }
+  });
+</script>
+{% endblock %}
