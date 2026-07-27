@@ -105,9 +105,9 @@ def build_result_payload(
     user_ids = result.candidate_ids
     users = {
         u.pk: u
-        for u in User.objects.filter(pk__in=user_ids).only(
-            "pk", "first_name", "last_name", "username"
-        )
+        for u in User.objects.filter(pk__in=user_ids)
+        .select_related("voter_profile")
+        .only("pk", "first_name", "last_name", "email")
     }
 
     def user_label(uid: int) -> str:
@@ -115,7 +115,9 @@ def build_result_payload(
         if u is None:
             return str(uid)
         full = f"{u.first_name} {u.last_name}".strip()
-        return full or u.username
+        if full:
+            return full
+        return u.email or str(uid)
 
     eligible = eligible_voter_count(district)
     ballots = result.ballot_count

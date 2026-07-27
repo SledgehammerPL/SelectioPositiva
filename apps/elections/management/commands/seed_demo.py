@@ -11,14 +11,12 @@ from __future__ import annotations
 
 from datetime import date
 
-from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
 from elections.models import ElectoralDistrict, Office, Party, VoterProfile
 from geo.models import PollingStation, TerritorialLevel, TerritorialUnit
-
-User = get_user_model()
+from users.services.accounts import ensure_user_with_phone
 
 # slug → (min_age, candidacy_level_slug)
 OFFICE_CONSTRAINTS = {
@@ -33,6 +31,9 @@ OFFICE_CONSTRAINTS = {
     "radny-gminy": (18, "municipality"),
     "radny": (18, "municipality"),
 }
+
+# Stałe numery demo (logowanie).
+DEMO_PHONE = "+48500100100"
 
 # Slugi/kody tworzone kiedyś przez seed — do usunięcia przy obecności PKW.
 DEMO_UNIT_SLUGS = (
@@ -169,61 +170,43 @@ class Command(BaseCommand):
             d.territorial_units.set([poland])
 
         # ── Użytkownicy demo na prawdziwych obwodach ─────────────────────────
+        # (phone, first_name, last_name, birth_date, station)
         candidates_data = [
-            ("anna", "Kowalska", date(1975, 3, 15), station),
-            ("jan", "Nowak", date(1968, 7, 22), station),
-            ("piotr", "Wisniewski", date(1982, 1, 5), station),
-            ("maria", "Zielinska", date(1990, 11, 30), station),
-            ("ewa", "Maj", date(1978, 6, 10), station),
-            ("tomasz", "Krol", date(1985, 9, 18), station),
-            ("barbara", "Lewandowska", date(1972, 4, 25), station),
-            ("hanna", "Nowicka", date(1980, 2, 14), station_waw),
-            ("stefan", "Borkowski", date(1965, 12, 3), station_waw),
-            ("julia", "Malinowska", date(1993, 8, 27), station_waw),
-            ("adam", "Warszawski", date(1977, 5, 9), station_waw),
+            ("+48500100101", "Anna", "Kowalska", date(1975, 3, 15), station),
+            ("+48500100102", "Jan", "Nowak", date(1968, 7, 22), station),
+            ("+48500100103", "Piotr", "Wisniewski", date(1982, 1, 5), station),
+            ("+48500100104", "Maria", "Zielinska", date(1990, 11, 30), station),
+            ("+48500100105", "Ewa", "Maj", date(1978, 6, 10), station),
+            ("+48500100106", "Tomasz", "Krol", date(1985, 9, 18), station),
+            ("+48500100107", "Barbara", "Lewandowska", date(1972, 4, 25), station),
+            ("+48500100108", "Hanna", "Nowicka", date(1980, 2, 14), station_waw),
+            ("+48500100109", "Stefan", "Borkowski", date(1965, 12, 3), station_waw),
+            ("+48500100110", "Julia", "Malinowska", date(1993, 8, 27), station_waw),
+            ("+48500100111", "Adam", "Warszawski", date(1977, 5, 9), station_waw),
         ]
-        for username, last_name, birth_date, st in candidates_data:
-            u, created = User.objects.get_or_create(
-                username=username,
-                defaults={
-                    "first_name": username.capitalize(),
-                    "last_name": last_name,
-                    "email": f"{username}@selectio.local",
-                },
-            )
-            if created:
-                u.set_password("demo1234")
-                u.save()
-            VoterProfile.objects.update_or_create(
-                user=u,
-                defaults={
-                    "territorial_unit": st.precinct,
-                    "birth_date": birth_date,
-                },
+        for phone, first_name, last_name, birth_date, st in candidates_data:
+            ensure_user_with_phone(
+                phone=phone,
+                password="demo1234",
+                first_name=first_name,
+                last_name=last_name,
+                email=f"{phone.replace('+', '')}@selectio.local",
+                birth_date=birth_date,
+                territorial_unit=st.precinct,
             )
 
-        user, created = User.objects.get_or_create(
-            username="demo",
-            defaults={
-                "email": "demo@selectio.local",
-                "first_name": "Anna",
-                "last_name": "Wyborcza",
-            },
-        )
-        if created or not user.has_usable_password():
-            user.set_password("demo1234")
-            user.save()
-
-        VoterProfile.objects.update_or_create(
-            user=user,
-            defaults={
-                "territorial_unit": station.precinct,
-                "birth_date": date(1990, 5, 12),
-            },
+        ensure_user_with_phone(
+            phone=DEMO_PHONE,
+            password="demo1234",
+            first_name="Anna",
+            last_name="Wyborcza",
+            email="demo@selectio.local",
+            birth_date=date(1990, 5, 12),
+            territorial_unit=station.precinct,
         )
 
         self.stdout.write(self.style.SUCCESS("Seed demo OK (bez geografii demo)."))
-        self.stdout.write("  Login: demo / demo1234")
+        self.stdout.write(f"  Login: {DEMO_PHONE} / demo1234")
         self.stdout.write(f"  Obwód demo: {station.precinct}")
         self.stdout.write(f"  Komisja (lokalizacja): {station}")
 

@@ -6,7 +6,7 @@
 <section class="auth-panel">
   <p class="eyebrow">Głosowanie rankingowe</p>
   <h1 class="auth-brand">Selectio <em>Positiva</em></h1>
-  <p class="lede">Zaloguj się, aby zobaczyć mapę swojego okręgu i oddać głos metodą Schulzego.</p>
+  <p class="lede">Zaloguj się emailem, aby zobaczyć mapę swojego okręgu i oddać głos metodą Schulzego.</p>
 
   <form method="post" class="auth-form" novalidate>
     {% csrf_token %}
@@ -14,15 +14,21 @@
     <div class="flash flash-error">{{ form.non_field_errors }}</div>
     {% endif %}
     <label class="field">
-      <span>Login</span>
+      <span>Email</span>
       {{ form.username }}
+      {% if form.username.errors %}
+      <span class="field-error">{{ form.username.errors.0 }}</span>
+      {% endif %}
     </label>
     <label class="field">
       <span>Hasło</span>
       {{ form.password }}
+      {% if form.password.errors %}
+      <span class="field-error">{{ form.password.errors.0 }}</span>
+      {% endif %}
     </label>
     <button type="submit" class="btn btn-primary btn-block">Wejdź do panelu</button>
   </form>
-  <p class="hint">Konto demo: <code>demo</code> / <code>demo1234</code></p>
+  <p class="hint">Konto demo: <code>demo@selectio.local</code> / <code>demo1234</code></p>
 </section>
 {% endblock %}

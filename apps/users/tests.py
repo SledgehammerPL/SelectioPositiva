@@ -41,16 +41,21 @@ def _make_station(code: str, precinct: TerritorialUnit) -> PollingStation:
     )
 
 
-def _make_user(username: str, station: PollingStation, birth_year: int = 1985) -> User:
+def _make_user(label: str, station: PollingStation, birth_year: int = 1985) -> User:
     from datetime import date
-    u = User.objects.create_user(username, password="x", first_name=username.capitalize(), last_name="Testowy")
-    VoterProfile.objects.create(
-        user=u,
-        territorial_unit=station.precinct,
-        birth_date=date(birth_year, 6, 1),
-    )
-    return u
+    from users.services.accounts import ensure_user_with_phone
 
+    # Unikalny fikcyjny numer na bazie etykiety testu.
+    digit_tail = abs(hash(label)) % 100_000_000
+    phone = f"+485{digit_tail:08d}"
+    return ensure_user_with_phone(
+        phone=phone,
+        password="x",
+        first_name=label.capitalize()[:30],
+        last_name="Testowy",
+        birth_date=date(birth_year, 6, 1),
+        territorial_unit=station.precinct,
+    )
 
 class StationChangeTests(TestCase):
     def setUp(self):
@@ -177,7 +182,14 @@ class EligibilityByHierarchyTests(TestCase):
         self.assertIn("eh-d-prez", eligible)
 
     def test_no_station_cannot_vote(self):
-        user = User.objects.create_user("eh_nostation", password="x")
+        from users.services.accounts import ensure_user_with_phone
+
+        user = ensure_user_with_phone(
+            phone="+48509999999",
+            password="x",
+            first_name="Bez",
+            last_name="Obwodu",
+        )
         eligible = get_eligible_districts(user)
         self.assertFalse(eligible.exists())
 

@@ -1,6 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth import get_user_model
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
+from django.utils.translation import gettext_lazy as _
 
 from .models import (
     Ballot,
@@ -19,10 +20,64 @@ class VoterProfileInline(admin.StackedInline):
     can_delete = False
     fk_name = "user"
     raw_id_fields = ("territorial_unit",)
+    fields = ("phone", "birth_date", "territorial_unit")
 
 
 class UserWithProfileAdmin(BaseUserAdmin):
     inlines = (VoterProfileInline,)
+    list_display = ("phone_display", "first_name", "last_name", "is_staff", "is_active")
+    search_fields = ("first_name", "last_name", "email", "voter_profile__phone")
+    ordering = ("pk",)
+    # Username jest tylko wewnętrzne (u{id}) — logowanie po telefonie.
+    fieldsets = (
+        (None, {"fields": ("password",)}),
+        (_("Dane osobowe"), {"fields": ("first_name", "last_name", "email")}),
+        (
+            _("Uprawnienia"),
+            {
+                "fields": (
+                    "is_active",
+                    "is_staff",
+                    "is_superuser",
+                    "groups",
+                    "user_permissions",
+                ),
+            },
+        ),
+        (_("Ważne daty"), {"fields": ("last_login", "date_joined")}),
+    )
+    add_fieldsets = (
+        (
+            None,
+            {
+                "classes": ("wide",),
+                "fields": ("password1", "password2"),
+                "description": (
+                    "Po utworzeniu uzupełnij telefon (+48…) w profilu wyborcy — "
+                    "to login użytkownika."
+                ),
+            },
+        ),
+    )
+
+    @admin.display(description="Telefon")
+    def phone_display(self, obj):
+        try:
+            return obj.voter_profile.phone
+        except VoterProfile.DoesNotExist:
+            return "—"
+
+    def save_model(self, request, obj, form, change):
+        import uuid
+
+        creating = obj.pk is None
+        if creating and not obj.username:
+            obj.username = f"_tmp_{uuid.uuid4().hex[:12]}"
+        super().save_model(request, obj, form, change)
+        desired = f"u{obj.pk}"
+        if obj.username != desired:
+            obj.username = desired
+            obj.save(update_fields=["username"])
 
 
 admin.site.unregister(User)
@@ -65,15 +120,21 @@ class ElectoralDistrictAdmin(admin.ModelAdmin):
 class BallotAdmin(admin.ModelAdmin):
     list_display = ("user", "district", "is_voided", "void_reason", "updated_at")
     list_filter = ("is_voided", "district__office", "void_reason")
-    search_fields = ("user__username", "district__name")
+    search_fields = (
+        "user__first_name",
+        "user__last_name",
+        "user__voter_profile__phone",
+        "district__name",
+    )
     raw_id_fields = ("user", "district")
     readonly_fields = ("created_at", "updated_at", "voided_at")
 
 
 @admin.register(VoterProfile)
 class VoterProfileAdmin(admin.ModelAdmin):
-    list_display = ("user", "territorial_unit", "birth_date")
+    list_display = ("phone", "user", "territorial_unit", "birth_date")
     list_filter = ("territorial_unit__kind",)
+    search_fields = ("phone", "user__first_name", "user__last_name")
     raw_id_fields = ("user", "territorial_unit")
 
 

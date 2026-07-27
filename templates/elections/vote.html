@@ -60,7 +60,7 @@
           <span class="rank-num" aria-hidden="true"></span>
           <span class="drag-handle" title="Przeciągnij" aria-hidden="true">⋮⋮</span>
           <div class="candidate-body">
-            <strong>{{ u.get_full_name|default:u.username }}</strong>
+            <strong>{{ u.get_full_name|default:u.email }}</strong>
             {% if u.voter_profile.birth_date %}
             <span class="candidate-committee">ur. {{ u.voter_profile.birth_date|date:"Y-m-d" }}</span>
             {% endif %}

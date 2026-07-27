@@ -5,7 +5,6 @@ from datetime import date
 from django.contrib import messages
 from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
-from django.contrib.auth.forms import AuthenticationForm
 from django.contrib.auth.views import LoginView, LogoutView
 from django.db.models import Q
 from django.http import HttpRequest, HttpResponse, HttpResponseForbidden, JsonResponse
@@ -24,27 +23,17 @@ from elections.services import (
 )
 from elections.services.eligibility import get_eligible_districts, user_age_on, user_may_run_in_district
 from geo.models import TerritorialUnit
+from users.forms import EmailAuthenticationForm
 
 User = get_user_model()
 
 MIN_SEARCH_CHARS = 3
 
 
-class StyledAuthenticationForm(AuthenticationForm):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.fields["username"].widget.attrs.update(
-            {"placeholder": "demo", "autocomplete": "username"}
-        )
-        self.fields["password"].widget.attrs.update(
-            {"placeholder": "••••••••", "autocomplete": "current-password"}
-        )
-
-
 class ElectionLoginView(LoginView):
     template_name = "registration/login.html"
     redirect_authenticated_user = True
-    authentication_form = StyledAuthenticationForm
+    authentication_form = EmailAuthenticationForm
 
 
 class ElectionLogoutView(LogoutView):
@@ -56,14 +45,14 @@ def _user_payload(user) -> dict:
     birth = None
     try:
         profile = user.voter_profile
-        if profile and profile.birth_date:
-            birth = str(profile.birth_date)
+        if profile:
+            if profile.birth_date:
+                birth = str(profile.birth_date)
     except Exception:
         pass
     return {
         "id": user.pk,
-        "name": full or user.username,
-        "username": user.username,
+        "name": full or user.email or f"#{user.pk}",
         "birth_date": birth,
     }
 
@@ -110,13 +99,13 @@ def _search_users_for_district(
         qs = qs.filter(
             Q(first_name__istartswith=query)
             | Q(last_name__istartswith=query)
-            | Q(username__istartswith=query)
+            | Q(email__istartswith=query)
         )
 
     if exclude_ids:
         qs = qs.exclude(pk__in=exclude_ids)
 
-    qs = qs.order_by("last_name", "first_name", "username")
+    qs = qs.order_by("last_name", "first_name", "pk")
 
     # Filtr terytorialny kandydatury (office.candidacy_level) + wiek (office.min_age)
     min_age = district.office.min_age if district.office_id else 0
