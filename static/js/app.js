@@ -38,20 +38,54 @@
     init(opts) {
       const pool = opts.pool;
       const rankList = opts.rankList;
-      const search = opts.search;
       const form = opts.form;
+      const statusEl = opts.statusEl;
+      const queryEl = opts.queryEl;
+      const birthEl = opts.birthEl;
+      const searchUrl = opts.searchUrl || "";
       const byId = {};
-      (opts.candidates || []).forEach((c) => {
+      const MIN_CHARS = 3;
+      let debounceTimer = null;
+      let requestSeq = 0;
+      let activeIndex = -1;
+
+      (opts.ranked || []).forEach((c) => {
         byId[String(c.id)] = c;
       });
 
       const emptyRank = document.querySelector(".rank-empty-msg");
-      const noMatch = document.querySelector(".pool-no-match");
+
+      function rankedIds() {
+        return Array.from(rankList.querySelectorAll(".candidate-item")).map(
+          (el) => el.dataset.id
+        );
+      }
 
       function syncEmpty() {
         if (emptyRank) {
-          emptyRank.hidden = rankList.querySelectorAll(".candidate-item").length > 0;
+          emptyRank.hidden =
+            rankList.querySelectorAll(".candidate-item").length > 0;
         }
+      }
+
+      function setStatus(text) {
+        if (statusEl) statusEl.textContent = text;
+      }
+
+      function queryValue() {
+        return (queryEl && queryEl.value ? queryEl.value : "").trim();
+      }
+
+      function birthValue() {
+        return birthEl && birthEl.value ? birthEl.value : "";
+      }
+
+      function filterActive() {
+        return queryValue().length >= MIN_CHARS || !!birthValue();
+      }
+
+      function setExpanded(open) {
+        if (queryEl) queryEl.setAttribute("aria-expanded", open ? "true" : "false");
       }
 
       function makeRankItem(c) {
@@ -61,63 +95,165 @@
         li.innerHTML =
           '<span class="rank-num" aria-hidden="true"></span>' +
           '<span class="drag-handle" title="Przeciągnij" aria-hidden="true">⋮⋮</span>' +
-          '<div class="candidate-body"><strong></strong>' +
-          (c.committee ? '<span class="candidate-committee"></span>' : "") +
-          "</div>" +
+          '<div class="candidate-body"><strong></strong></div>' +
           '<button type="button" class="btn btn-ghost btn-sm js-remove-rank" title="Usuń z rankingu">Usuń</button>' +
           '<input type="hidden" name="ranked_candidate_ids" value="">';
         li.querySelector("strong").textContent = c.name;
-        const committeeEl = li.querySelector(".candidate-committee");
-        if (committeeEl) committeeEl.textContent = c.committee;
-        li.querySelector('input[name="ranked_candidate_ids"]').value = String(c.id);
+        const body = li.querySelector(".candidate-body");
+        if (c.birth_date) {
+          const span = document.createElement("span");
+          span.className = "candidate-committee";
+          span.textContent = "ur. " + c.birth_date;
+          body.appendChild(span);
+        }
+        if (c.committee) {
+          const span = document.createElement("span");
+          span.className = "candidate-committee";
+          span.textContent = c.committee;
+          body.appendChild(span);
+        }
+        li.querySelector('input[name="ranked_candidate_ids"]').value = String(
+          c.id
+        );
         return li;
       }
 
-      function makePoolItem(c) {
+      function makePoolItem(c, index) {
         const li = document.createElement("li");
-        li.className = "pool-item";
+        li.className = "ac-option";
         li.dataset.id = String(c.id);
-        li.dataset.name = (c.name || "").toLowerCase();
-        li.dataset.committee = (c.committee || "").toLowerCase();
+        li.dataset.index = String(index);
+        li.setAttribute("role", "option");
+        li.id = "ac-opt-" + c.id;
+        const metaBits = [];
+        if (c.birth_date) metaBits.push("ur. " + c.birth_date);
+        if (c.parties) metaBits.push(c.parties);
+        if (c.committee) metaBits.push(c.committee);
         li.innerHTML =
-          '<div class="candidate-body"><strong></strong>' +
-          (c.committee ? '<span class="candidate-committee"></span>' : "") +
-          (c.bio ? '<span class="candidate-bio"></span>' : "") +
-          "</div>" +
-          '<button type="button" class="btn btn-secondary btn-sm js-add-rank">+ Dodaj do mojego rankingu</button>';
-        li.querySelector("strong").textContent = c.name;
-        const committeeEl = li.querySelector(".candidate-committee");
-        if (committeeEl) committeeEl.textContent = c.committee;
-        const bioEl = li.querySelector(".candidate-bio");
-        if (bioEl) bioEl.textContent = c.bio;
+          '<span class="ac-option-name"></span>' +
+          (metaBits.length
+            ? '<span class="ac-option-meta"></span>'
+            : "") +
+          '<span class="ac-option-add" aria-hidden="true">Dodaj</span>';
+        li.querySelector(".ac-option-name").textContent = c.name;
+        const meta = li.querySelector(".ac-option-meta");
+        if (meta) meta.textContent = metaBits.join(" · ");
         return li;
       }
 
-      function filterPool() {
-        const q = (search.value || "").trim().toLowerCase();
-        let visible = 0;
-        pool.querySelectorAll(".pool-item").forEach((item) => {
-          const hay =
-            (item.dataset.name || "") + " " + (item.dataset.committee || "");
-          const show = !q || hay.includes(q);
-          item.hidden = !show;
-          if (show) visible += 1;
+      function highlightActive() {
+        const items = pool.querySelectorAll(".ac-option");
+        items.forEach((el, i) => {
+          el.classList.toggle("is-active", i === activeIndex);
+          if (i === activeIndex) {
+            el.scrollIntoView({ block: "nearest" });
+            if (queryEl) queryEl.setAttribute("aria-activedescendant", el.id);
+          }
         });
-        if (noMatch) noMatch.hidden = visible > 0 || !q;
+        if (activeIndex < 0 && queryEl) {
+          queryEl.removeAttribute("aria-activedescendant");
+        }
       }
 
-      pool.addEventListener("click", (e) => {
-        const btn = e.target.closest(".js-add-rank");
-        if (!btn) return;
-        const item = btn.closest(".pool-item");
-        if (!item) return;
-        const c = byId[item.dataset.id];
+      function renderResults(results) {
+        pool.innerHTML = "";
+        activeIndex = -1;
+        const taken = new Set(rankedIds());
+        let visible = 0;
+        (results || []).forEach((c) => {
+          const id = String(c.id);
+          byId[id] = c;
+          if (taken.has(id)) return;
+          pool.appendChild(makePoolItem(c, visible));
+          visible += 1;
+        });
+        const open = visible > 0;
+        pool.hidden = !open;
+        setExpanded(open);
+        if (!filterActive()) {
+          setStatus("Zacznij wpisywać, aby zobaczyć podpowiedzi.");
+          return;
+        }
+        if (visible === 0) {
+          setStatus("Brak kandydatów spełniających kryteria.");
+        } else {
+          setStatus("Podpowiedzi: " + visible + " — kliknij lub Enter, aby dodać.");
+        }
+      }
+
+      function addCandidate(c) {
         if (!c) return;
-        item.remove();
         rankList.appendChild(makeRankItem(c));
         renumber(rankList);
         syncEmpty();
-        filterPool();
+        if (queryEl) {
+          queryEl.value = "";
+          queryEl.focus();
+        }
+        scheduleSearch();
+      }
+
+      function runSearch() {
+        if (!searchUrl) {
+          setStatus("Brak adresu wyszukiwania.");
+          return;
+        }
+        if (!filterActive()) {
+          pool.innerHTML = "";
+          pool.hidden = true;
+          setExpanded(false);
+          activeIndex = -1;
+          setStatus("Zacznij wpisywać, aby zobaczyć podpowiedzi.");
+          return;
+        }
+
+        const params = new URLSearchParams();
+        params.set("q", queryValue());
+        params.set("birth_date", birthValue());
+        const exclude = rankedIds();
+        if (exclude.length) params.set("exclude", exclude.join(","));
+
+        const seq = ++requestSeq;
+        setStatus("Szukam…");
+        fetch(searchUrl + "?" + params.toString(), {
+          headers: { Accept: "application/json" },
+          credentials: "same-origin",
+        })
+          .then((res) => {
+            if (!res.ok) throw new Error("HTTP " + res.status);
+            return res.json();
+          })
+          .then((data) => {
+            if (seq !== requestSeq) return;
+            if (!data.active) {
+              pool.innerHTML = "";
+              pool.hidden = true;
+              setExpanded(false);
+              setStatus("Zacznij wpisywać, aby zobaczyć podpowiedzi.");
+              return;
+            }
+            renderResults(data.results || []);
+          })
+          .catch(() => {
+            if (seq !== requestSeq) return;
+            pool.innerHTML = "";
+            pool.hidden = true;
+            setExpanded(false);
+            setStatus("Nie udało się pobrać podpowiedzi.");
+          });
+      }
+
+      function scheduleSearch() {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(runSearch, 200);
+      }
+
+      pool.addEventListener("mousedown", (e) => {
+        const item = e.target.closest(".ac-option");
+        if (!item) return;
+        e.preventDefault();
+        const c = byId[item.dataset.id];
+        addCandidate(c);
       });
 
       rankList.addEventListener("click", (e) => {
@@ -125,17 +261,43 @@
         if (!btn) return;
         const item = btn.closest(".candidate-item");
         if (!item) return;
-        const c = byId[item.dataset.id];
-        if (!c) return;
         item.remove();
-        pool.appendChild(makePoolItem(c));
         renumber(rankList);
         syncEmpty();
-        filterPool();
+        scheduleSearch();
       });
 
-      if (search) {
-        search.addEventListener("input", filterPool);
+      if (queryEl) {
+        queryEl.addEventListener("input", scheduleSearch);
+        queryEl.addEventListener("keydown", (e) => {
+          const items = pool.querySelectorAll(".ac-option");
+          if (e.key === "ArrowDown") {
+            if (!items.length) return;
+            e.preventDefault();
+            activeIndex = Math.min(activeIndex + 1, items.length - 1);
+            highlightActive();
+          } else if (e.key === "ArrowUp") {
+            if (!items.length) return;
+            e.preventDefault();
+            activeIndex = Math.max(activeIndex - 1, 0);
+            highlightActive();
+          } else if (e.key === "Enter") {
+            e.preventDefault();
+            if (activeIndex >= 0 && items[activeIndex]) {
+              addCandidate(byId[items[activeIndex].dataset.id]);
+            } else if (items.length === 1) {
+              addCandidate(byId[items[0].dataset.id]);
+            }
+          } else if (e.key === "Escape") {
+            pool.hidden = true;
+            setExpanded(false);
+            activeIndex = -1;
+          }
+        });
+      }
+      if (birthEl) {
+        birthEl.addEventListener("change", scheduleSearch);
+        birthEl.addEventListener("input", scheduleSearch);
       }
 
       if (form) {
@@ -161,6 +323,9 @@
       }
       renumber(rankList);
       syncEmpty();
+      pool.hidden = true;
+      setExpanded(false);
+      setStatus("Zacznij wpisywać, aby zobaczyć podpowiedzi.");
     },
   };
 

@@ -7,6 +7,11 @@ urlpatterns = [
     path("logout/", views.ElectionLogoutView.as_view(), name="logout"),
     path("dashboard/", views.dashboard, name="dashboard"),
     path("vote/<slug:slug>/", views.vote_district, name="vote_district"),
+    path(
+        "vote/<slug:slug>/search/",
+        views.vote_candidate_search,
+        name="vote_candidate_search",
+    ),
     path("vote/<slug:slug>/clear/", views.clear_ballot, name="clear_ballot"),
     path("results/", views.results, name="results"),
 ]

@@ -19,7 +19,7 @@ def _station_tree_payload() -> list[dict]:
     voivodeships = TerritorialUnit.objects.filter(
         kind=TerritorialUnit.Kind.VOIVODESHIP
     ).order_by("name")
-    stations = PollingStation.objects.select_related("territorial_unit").order_by("name")
+    stations = PollingStation.objects.select_related("precinct__parent__parent__parent").order_by("name")
 
     tree: dict[int, dict] = {}
     for v in voivodeships:
@@ -30,7 +30,9 @@ def _station_tree_payload() -> list[dict]:
         }
 
     for station in stations:
-        unit = station.territorial_unit
+        if station.precinct is None:
+            continue
+        unit = station.precinct
         ancestors = unit.get_ancestors(include_self=True)
         voiv = next(
             (a for a in ancestors if a.kind == TerritorialUnit.Kind.VOIVODESHIP),
@@ -51,7 +53,7 @@ def _station_tree_payload() -> list[dict]:
                 "code": station.code,
                 "name": station.name,
                 "address": station.address,
-                "label": f"{station.code} — {station.name}",
+                "label": f"{str(station)}",
             }
         )
 

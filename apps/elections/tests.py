@@ -77,6 +77,12 @@ class ResultsCacheTests(TestCase):
             slug="test-polska",
             kind=TerritorialUnit.Kind.COUNTRY,
         )
+        self.gmina = TerritorialUnit.objects.create(
+            name="Gmina Test",
+            slug="test-gmina",
+            kind=TerritorialUnit.Kind.MUNICIPALITY,
+            parent=self.unit,
+        )
         self.office = Office.objects.create(name="Test Office", slug="test-office")
         self.district = ElectoralDistrict.objects.create(
             office=self.office,
@@ -86,10 +92,18 @@ class ResultsCacheTests(TestCase):
             seats_count=1,
         )
         self.c1 = Candidate.objects.create(
-            district=self.district, name="Alpha", display_order=0
+            first_name="Alpha",
+            last_name="Jeden",
+            citizenship=self.unit,
+            residence_municipality=self.gmina,
+            display_order=0,
         )
         self.c2 = Candidate.objects.create(
-            district=self.district, name="Beta", display_order=1
+            first_name="Beta",
+            last_name="Dwa",
+            citizenship=self.unit,
+            residence_municipality=self.gmina,
+            display_order=1,
         )
         User = get_user_model()
         self.user = User.objects.create_user("voter1", password="x")

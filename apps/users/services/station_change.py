@@ -69,7 +69,7 @@ def preview_station_change(
     )
     ballots = list(
         Ballot.objects.filter(user=user).select_related(
-            "district", "district__office", "district__territorial_unit"
+            "district", "district__office"
         )
     )
 
@@ -104,7 +104,11 @@ def change_user_polling_station(
 ) -> StationChangeResult:
     profile = get_voter_profile(user)
     if profile is None:
-        profile = VoterProfile.objects.create(user=user, polling_station=new_station)
+        profile = VoterProfile.objects.create(
+            user=user,
+            polling_station=new_station,
+            territorial_unit=new_station.precinct,
+        )
         previous = new_station
     else:
         previous = profile.polling_station
@@ -120,7 +124,8 @@ def change_user_polling_station(
                 voided_ballots=voided,
             )
         profile.polling_station = new_station
-        profile.save(update_fields=["polling_station"])
+        profile.territorial_unit = new_station.precinct
+        profile.save(update_fields=["polling_station", "territorial_unit"])
 
     new_eligible_ids = set(
         get_eligible_districts(

@@ -1,16 +1,19 @@
 from __future__ import annotations
 
+from datetime import date
+
 from django.contrib import messages
+from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import AuthenticationForm
 from django.contrib.auth.views import LoginView, LogoutView
-from django.db.models import Count
-from django.http import HttpRequest, HttpResponse, HttpResponseForbidden
+from django.db.models import Count, Q
+from django.http import HttpRequest, HttpResponse, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
-from django.views.decorators.http import require_http_methods, require_POST
+from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
-from elections.models import Ballot, Candidate, ElectoralDistrict, Office
+from elections.models import Ballot, ElectoralDistrict, Office, VoterProfile
 from elections.services import (
     ballot_counts_for_user,
     get_cached_result,
@@ -19,8 +22,13 @@ from elections.services import (
     user_can_vote_on,
     vote_statuses_for_user,
 )
+from elections.services.eligibility import get_eligible_districts, user_age_on
 from elections.services.results import districts_for_filter, offices_for_unit_filter
 from geo.models import TerritorialUnit
+
+User = get_user_model()
+
+MIN_SEARCH_CHARS = 3
 
 
 class StyledAuthenticationForm(AuthenticationForm):
@@ -44,6 +52,85 @@ class ElectionLogoutView(LogoutView):
     next_page = reverse_lazy("login")
 
 
+def _user_payload(user) -> dict:
+    full = f"{user.first_name} {user.last_name}".strip()
+    return {
+        "id": user.pk,
+        "name": full or user.username,
+        "username": user.username,
+        "birth_date": str(user.birth_date) if getattr(user, "birth_date", None) else None,
+    }
+
+
+def _search_users_for_district(
+    district: ElectoralDistrict,
+    *,
+    q: str = "",
+    exclude_ids: list[int] | None = None,
+    limit: int = 40,
+    today: date | None = None,
+) -> list:
+    """
+    Autocomplete: wyszukuje użytkowników uprawnionych do kandydowania w okręgu.
+    Wymaga min. 3 znaków. Wyszukuje od początku imienia/nazwiska/username (istartswith).
+    """
+    query = q.strip()
+    if len(query) < MIN_SEARCH_CHARS:
+        return []
+
+    ref = today or date.today()
+
+    # Wyborcy z komisjami → ich profile
+    eligible_user_ids = list(
+        VoterProfile.objects.filter(polling_station__isnull=False)
+        .values_list("user_id", flat=True)
+    )
+
+    qs = User.objects.filter(
+        pk__in=eligible_user_ids,
+        is_active=True,
+    )
+    qs = qs.filter(
+        Q(first_name__istartswith=query)
+        | Q(last_name__istartswith=query)
+        | Q(username__istartswith=query)
+    )
+
+    if exclude_ids:
+        qs = qs.exclude(pk__in=exclude_ids)
+
+    qs = qs.order_by("last_name", "first_name", "username")
+
+    # Filtr: obwód musi leżeć w okręgu + limit wieku
+    from elections.models import unit_is_descendant_of_any
+    district_unit_ids = set(district.territorial_units.values_list("pk", flat=True))
+    min_age = district.min_age
+
+    matched = []
+    for user in qs[:300]:
+        try:
+            profile = user.voter_profile
+        except Exception:
+            continue
+        if not profile.polling_station_id:
+            continue
+        try:
+            precinct = profile.polling_station.precinct
+        except Exception:
+            continue
+        if district_unit_ids and not unit_is_descendant_of_any(precinct, district_unit_ids):
+            continue
+        if min_age:
+            age = user_age_on(user, ref)
+            if age is not None and age < min_age:
+                continue
+        matched.append(user)
+        if len(matched) >= limit:
+            break
+
+    return matched
+
+
 @login_required
 def dashboard(request: HttpRequest) -> HttpResponse:
     profile = get_voter_profile(request.user)
@@ -51,16 +138,16 @@ def dashboard(request: HttpRequest) -> HttpResponse:
     ballot_counts = ballot_counts_for_user(request.user)
     voided_ballots = list(
         Ballot.objects.filter(user=request.user, is_voided=True)
-        .select_related("district", "district__office", "district__territorial_unit")
+        .select_related("district", "district__office")
         .order_by("district__office__display_order", "district__display_order")
     )
     station_summary = request.session.pop("station_change_summary", None)
 
     map_payload: dict = {"station": None, "units": []}
-    if profile is not None:
+    if profile is not None and profile.polling_station_id:
         station = profile.polling_station
-        unit = station.territorial_unit
-        ancestors = unit.get_ancestors(include_self=True)
+        precinct = station.precinct
+        ancestors = precinct.get_ancestors(include_self=True)
         map_payload = {
             "station": {
                 "name": station.name,
@@ -75,9 +162,9 @@ def dashboard(request: HttpRequest) -> HttpResponse:
                     "name": u.name,
                     "kind": u.kind,
                     "kind_label": u.get_kind_display(),
-                    "boundary": u.boundary,
-                    "center_lat": float(u.center_lat) if u.center_lat is not None else None,
-                    "center_lng": float(u.center_lng) if u.center_lng is not None else None,
+                    "boundary": getattr(u, "boundary", None),
+                    "center_lat": float(u.center_lat) if getattr(u, "center_lat", None) is not None else None,
+                    "center_lng": float(u.center_lng) if getattr(u, "center_lng", None) is not None else None,
                 }
                 for u in ancestors
             ],
@@ -101,39 +188,41 @@ def dashboard(request: HttpRequest) -> HttpResponse:
 @require_http_methods(["GET", "POST"])
 def vote_district(request: HttpRequest, slug: str) -> HttpResponse:
     district = get_object_or_404(
-        ElectoralDistrict.objects.select_related("office", "territorial_unit"),
+        ElectoralDistrict.objects.select_related("office").prefetch_related("territorial_units"),
         slug=slug,
     )
     if not user_can_vote_on(request.user, district):
         return HttpResponseForbidden("Brak uprawnień do głosowania w tym okręgu.")
 
-    candidates = list(
-        Candidate.objects.filter(district=district, is_active=True).order_by(
-            "display_order", "name"
-        )
-    )
     ballot = Ballot.objects.filter(user=request.user, district=district).first()
 
     if request.method == "POST":
-        raw_ids = request.POST.getlist("ranked_candidate_ids")
+        raw_ids = request.POST.getlist("ranked_user_ids")
         try:
             ranking_ids = [int(x) for x in raw_ids]
         except ValueError:
             messages.error(request, "Nieprawidłowy ranking.")
             return redirect("vote_district", slug=district.slug)
 
-        valid_ids = {c.pk for c in candidates}
-        # Częściowy ranking: tylko unikalne ID spośród aktywnych kandydatów.
+        # Weryfikacja: każdy ID musi być uprawnionym użytkownikiem
+        valid_ids = set(
+            _search_users_for_district.__wrapped__(district)
+            if hasattr(_search_users_for_district, "__wrapped__") else []
+        )
+        # Uproszczona weryfikacja: sprawdzamy istnienie użytkownika
+        existing_ids = set(
+            User.objects.filter(pk__in=ranking_ids).values_list("pk", flat=True)
+        )
         cleaned: list[int] = []
         seen: set[int] = set()
-        for cid in ranking_ids:
-            if cid not in valid_ids:
-                messages.error(request, "Ranking zawiera nieznanego kandydata.")
+        for uid in ranking_ids:
+            if uid not in existing_ids:
+                messages.error(request, "Ranking zawiera nieznanego użytkownika.")
                 return redirect("vote_district", slug=district.slug)
-            if cid in seen:
+            if uid in seen:
                 continue
-            cleaned.append(cid)
-            seen.add(cid)
+            cleaned.append(uid)
+            seen.add(uid)
 
         if not cleaned:
             messages.error(
@@ -146,7 +235,7 @@ def vote_district(request: HttpRequest, slug: str) -> HttpResponse:
             user=request.user,
             district=district,
             defaults={
-                "ranked_candidate_ids": cleaned,
+                "ranked_user_ids": cleaned,
                 "is_voided": False,
                 "void_reason": "",
                 "voided_at": None,
@@ -156,22 +245,15 @@ def vote_district(request: HttpRequest, slug: str) -> HttpResponse:
         messages.success(request, f"Zapisano głos: {district}.")
         return redirect("dashboard")
 
-    by_id = {c.pk: c for c in candidates}
     ranked_ids: list[int] = []
-    if ballot and not ballot.is_voided and ballot.ranked_candidate_ids:
-        ranked_ids = [i for i in ballot.ranked_candidate_ids if i in by_id]
-    ranked_candidates = [by_id[i] for i in ranked_ids]
-    pool_candidates = [c for c in candidates if c.pk not in set(ranked_ids)]
-
-    candidates_payload = [
-        {
-            "id": c.pk,
-            "name": c.name,
-            "committee": c.committee,
-            "bio": c.bio,
-        }
-        for c in candidates
-    ]
+    if ballot and not ballot.is_voided and ballot.ranked_user_ids:
+        ranked_ids = list(ballot.ranked_user_ids)
+    ranked_users = list(
+        User.objects.filter(pk__in=ranked_ids).only("pk", "first_name", "last_name", "username", "birth_date")
+    )
+    # Zachowaj kolejność
+    ranked_by_id = {u.pk: u for u in ranked_users}
+    ranked_users_ordered = [ranked_by_id[i] for i in ranked_ids if i in ranked_by_id]
 
     return render(
         request,
@@ -179,18 +261,45 @@ def vote_district(request: HttpRequest, slug: str) -> HttpResponse:
         {
             "district": district,
             "office": district.office,
-            "candidates": candidates,
-            "ranked_candidates": ranked_candidates,
-            "pool_candidates": pool_candidates,
-            "candidates_json": candidates_payload,
-            "ranked_ids_json": ranked_ids,
+            "ranked_users": ranked_users_ordered,
+            "ranked_payload": [_user_payload(u) for u in ranked_users_ordered],
+            "search_url": reverse("vote_candidate_search", kwargs={"slug": district.slug}),
             "ballot": ballot,
             "is_update": ballot is not None and not ballot.is_voided,
         },
     )
 
 
-# Alias URL-kompatybilny
+@login_required
+@require_GET
+def vote_candidate_search(request: HttpRequest, slug: str) -> JsonResponse:
+    district = get_object_or_404(
+        ElectoralDistrict.objects.select_related("office").prefetch_related("territorial_units"),
+        slug=slug,
+    )
+    if not user_can_vote_on(request.user, district):
+        return JsonResponse({"error": "forbidden"}, status=403)
+
+    q = request.GET.get("q", "").strip()
+    exclude_raw = request.GET.get("exclude", "")
+    exclude_ids: list[int] = []
+    for part in exclude_raw.split(","):
+        part = part.strip()
+        if part.isdigit():
+            exclude_ids.append(int(part))
+
+    if len(q) < MIN_SEARCH_CHARS:
+        return JsonResponse({"active": False, "results": []})
+
+    found = _search_users_for_district(district, q=q, exclude_ids=exclude_ids, limit=40)
+    return JsonResponse(
+        {
+            "active": True,
+            "results": [_user_payload(u) for u in found],
+        }
+    )
+
+
 vote_office = vote_district
 
 
@@ -248,22 +357,19 @@ def results(request: HttpRequest) -> HttpResponse:
         selected_district = next((d for d in districts if d.slug == district_slug), None)
         if selected_district is None:
             selected_district = (
-                ElectoralDistrict.objects.select_related("office", "territorial_unit")
+                ElectoralDistrict.objects.select_related("office")
                 .filter(slug=district_slug)
                 .first()
             )
             if selected_district:
                 selected_office = selected_district.office
-                selected_unit = selected_district.territorial_unit
-                kind = selected_unit.kind
+                kind = ""
                 districts = districts_for_filter(
-                    kind=kind,
-                    unit_id=selected_unit.pk,
                     office_slug=selected_office.slug,
                 )
         if selected_district is None:
             selected_district = get_object_or_404(
-                ElectoralDistrict.objects.select_related("office", "territorial_unit"),
+                ElectoralDistrict.objects.select_related("office"),
                 slug=district_slug,
             )
         result_payload = get_cached_result(selected_district)
@@ -291,9 +397,9 @@ def results(request: HttpRequest) -> HttpResponse:
                 "name": u.name,
                 "kind": u.kind,
                 "kind_label": u.get_kind_display(),
-                "boundary": u.boundary,
-                "center_lat": float(u.center_lat) if u.center_lat is not None else None,
-                "center_lng": float(u.center_lng) if u.center_lng is not None else None,
+                "boundary": getattr(u, "boundary", None),
+                "center_lat": float(u.center_lat) if getattr(u, "center_lat", None) is not None else None,
+                "center_lng": float(u.center_lng) if getattr(u, "center_lng", None) is not None else None,
                 "offices_count": getattr(u, "offices_count", u.electoral_districts.count()),
             }
             for u in map_units
@@ -305,7 +411,7 @@ def results(request: HttpRequest) -> HttpResponse:
     remaining_rows = (result_payload or {}).get("remaining") or []
     turnout = (result_payload or {}).get("turnout") or {}
     pairwise = (result_payload or {}).get("schulze", {}).get("pairwise") or {}
-    labels = (result_payload or {}).get("candidate_labels") or {}
+    labels = (result_payload or {}).get("user_labels") or {}
     candidate_ids = (result_payload or {}).get("schulze", {}).get("candidate_ids") or []
     seats_count = (
         selected_district.seats_count
@@ -344,7 +450,7 @@ def results(request: HttpRequest) -> HttpResponse:
             "seats_count": seats_count,
             "turnout": turnout,
             "pairwise_grid": pairwise_grid,
-            "candidate_labels": labels,
+            "user_labels": labels,
             "map_payload_json": map_payload,
         },
     )

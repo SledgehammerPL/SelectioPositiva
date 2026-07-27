@@ -154,6 +154,7 @@ activemq-data/
 /data/pkw/*.xlsx
 /data/pkw/*.zip
 /data/pkw/_tmp_*
+/data/pkw/cache/
 env/
 venv/
 ENV/

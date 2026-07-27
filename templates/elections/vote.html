@@ -20,71 +20,61 @@
     </p>
   </div>
 
+  <div class="ac-panel" id="candidate-search-panel" data-search-url="{{ search_url }}">
+    <label class="ac-label" for="candidate-ac-query">Dodaj kandydata</label>
+    <div class="ac-row">
+      <div class="ac-combobox">
+        <input type="search" id="candidate-ac-query" class="ac-input"
+               placeholder="Imię lub nazwisko (min. 3 znaki)…"
+               autocomplete="off" spellcheck="false"
+               role="combobox" aria-autocomplete="list"
+               aria-controls="candidate-pool" aria-expanded="false">
+        <ul id="candidate-pool" class="ac-list" role="listbox" hidden></ul>
+      </div>
+      <label class="ac-birth">
+        <span>Data ur.</span>
+        <input type="date" id="candidate-ac-birth" autocomplete="off">
+      </label>
+    </div>
+    <p class="ac-status" id="candidate-search-status" aria-live="polite">
+      Zacznij wpisywać, aby zobaczyć podpowiedzi.
+    </p>
+  </div>
+
   <form method="post" id="ranking-form" class="ranking-form ballot-builder">
     {% csrf_token %}
 
-    <div class="ballot-columns">
-      <section class="ballot-col ballot-pool" aria-label="Pula kandydatów">
-        <header class="ballot-col-head">
-          <h2>Dodaj kandydatów</h2>
-          <label class="search-field">
-            <span class="sr-only">Szukaj</span>
-            <input type="search" id="candidate-search" placeholder="Szukaj po imieniu lub nazwisku…"
-                   autocomplete="off">
-          </label>
-        </header>
-        <ul id="candidate-pool" class="candidate-pool">
-          {% for c in pool_candidates %}
-          <li class="pool-item" data-id="{{ c.pk }}"
-              data-name="{{ c.name|lower }}"
-              data-committee="{{ c.committee|lower }}">
-            <div class="candidate-body">
-              <strong>{{ c.name }}</strong>
-              {% if c.committee %}<span class="candidate-committee">{{ c.committee }}</span>{% endif %}
-              {% if c.bio %}<span class="candidate-bio">{{ c.bio }}</span>{% endif %}
-            </div>
-            <button type="button" class="btn btn-secondary btn-sm js-add-rank">+ Dodaj do mojego rankingu</button>
-          </li>
-          {% empty %}
-          <li class="empty pool-empty-msg">Wszyscy kandydaci są już w Twoim rankingu (lub brak listy).</li>
-          {% endfor %}
-        </ul>
-        <p class="empty pool-no-match" hidden>Brak wyników wyszukiwania.</p>
-      </section>
+    <section class="ballot-col ballot-rank ballot-rank-solo" aria-label="Mój ranking">
+      <header class="ballot-col-head">
+        <h2>Mój ranking</h2>
+        <p class="hint">Przeciągnij, aby zmienić kolejność. 1 = najwyższa preferencja.</p>
+      </header>
+      <ol id="candidate-list" class="candidate-list" data-sortable>
+        {% for c in ranked_candidates %}
+        <li class="candidate-item" data-id="{{ c.pk }}">
+          <span class="rank-num" aria-hidden="true"></span>
+          <span class="drag-handle" title="Przeciągnij" aria-hidden="true">⋮⋮</span>
+          <div class="candidate-body">
+            <strong>{{ c.full_name }}</strong>
+            {% if c.birth_date %}<span class="candidate-committee">ur. {{ c.birth_date|date:"Y-m-d" }}</span>{% endif %}
+            {% if c.committee %}<span class="candidate-committee">{{ c.committee }}</span>{% endif %}
+          </div>
+          <button type="button" class="btn btn-ghost btn-sm js-remove-rank" title="Usuń z rankingu">Usuń</button>
+          <input type="hidden" name="ranked_candidate_ids" value="{{ c.pk }}">
+        </li>
+        {% endfor %}
+      </ol>
+      <p class="empty rank-empty-msg" {% if ranked_candidates %}hidden{% endif %}>
+        Ranking jest pusty — wyszukaj kandydatów powyżej i dodaj ich tutaj.
+      </p>
+    </section>
 
-      <section class="ballot-col ballot-rank" aria-label="Mój ranking">
-        <header class="ballot-col-head">
-          <h2>Mój ranking</h2>
-          <p class="hint">Przeciągnij, aby zmienić kolejność. 1 = najwyższa preferencja.</p>
-        </header>
-        <ol id="candidate-list" class="candidate-list" data-sortable>
-          {% for c in ranked_candidates %}
-          <li class="candidate-item" data-id="{{ c.pk }}">
-            <span class="rank-num" aria-hidden="true"></span>
-            <span class="drag-handle" title="Przeciągnij" aria-hidden="true">⋮⋮</span>
-            <div class="candidate-body">
-              <strong>{{ c.name }}</strong>
-              {% if c.committee %}<span class="candidate-committee">{{ c.committee }}</span>{% endif %}
-            </div>
-            <button type="button" class="btn btn-ghost btn-sm js-remove-rank" title="Usuń z rankingu">Usuń</button>
-            <input type="hidden" name="ranked_candidate_ids" value="{{ c.pk }}">
-          </li>
-          {% endfor %}
-        </ol>
-        <p class="empty rank-empty-msg" {% if ranked_candidates %}hidden{% endif %}>
-          Twój ranking jest pusty — dodaj kandydatów z listy po lewej.
-        </p>
-      </section>
-    </div>
-
-    {% if candidates %}
     <div class="form-actions">
       <button type="submit" class="btn btn-primary" id="btn-submit-ballot">
         {% if is_update %}Zapisz zmianę głosu{% else %}Oddaj głos{% endif %}
       </button>
       <a href="{% url 'dashboard' %}" class="btn btn-ghost">Anuluj</a>
     </div>
-    {% endif %}
   </form>
 
   {% if is_update %}
@@ -96,20 +86,23 @@
   {% endif %}
 </section>
 
-{{ candidates_json|json_script:"candidates-data" }}
-{{ ranked_ids_json|json_script:"ranked-ids-data" }}
+{{ ranked_payload|json_script:"ranked-data" }}
 {% endblock %}
 
 {% block extra_js %}
 <script>
   document.addEventListener('DOMContentLoaded', () => {
     if (window.SelectioBallot) {
+      const panel = document.getElementById('candidate-search-panel');
       window.SelectioBallot.init({
         form: document.getElementById('ranking-form'),
         pool: document.getElementById('candidate-pool'),
         rankList: document.getElementById('candidate-list'),
-        search: document.getElementById('candidate-search'),
-        candidates: JSON.parse(document.getElementById('candidates-data').textContent),
+        statusEl: document.getElementById('candidate-search-status'),
+        queryEl: document.getElementById('candidate-ac-query'),
+        birthEl: document.getElementById('candidate-ac-birth'),
+        searchUrl: panel ? panel.dataset.searchUrl : '',
+        ranked: JSON.parse(document.getElementById('ranked-data').textContent),
       });
     }
   });

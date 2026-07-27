@@ -527,14 +527,159 @@ h2 {
   margin-bottom: 0.5rem;
 }
 
-.search-field input {
+.ballot-col-head .hint {
+  margin: 0 0 0.75rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.ac-panel {
+  margin: 0 0 1.35rem;
+}
+
+.ac-label {
+  display: block;
+  margin: 0 0 0.45rem;
+  font-family: var(--font-display);
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+
+.ac-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: end;
+}
+
+.ac-combobox {
+  position: relative;
+  min-width: 0;
+}
+
+.ac-input {
   width: 100%;
   border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 0.65rem 0.8rem;
+  border-radius: 12px;
+  padding: 0.85rem 1rem;
+  font: inherit;
+  font-size: 1.05rem;
+  color: var(--ink);
+  background: #fff;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.ac-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(31, 111, 74, 0.16);
+}
+
+.ac-birth {
+  display: grid;
+  gap: 0.3rem;
+  min-width: 10.5rem;
+}
+
+.ac-birth > span {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.ac-birth input {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.75rem 0.8rem;
   font: inherit;
   background: #fff;
-  margin-bottom: 0.75rem;
+  color: var(--ink);
+}
+
+.ac-birth input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(31, 111, 74, 0.16);
+}
+
+.ac-list {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 0.35rem);
+  z-index: 30;
+  margin: 0;
+  padding: 0.35rem;
+  list-style: none;
+  max-height: min(320px, 42vh);
+  overflow: auto;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 14px 32px rgba(20, 32, 27, 0.14);
+}
+
+.ac-option {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto;
+  gap: 0.1rem 0.75rem;
+  align-items: center;
+  padding: 0.65rem 0.75rem;
+  border-radius: 9px;
+  cursor: pointer;
+}
+
+.ac-option:hover,
+.ac-option.is-active {
+  background: rgba(31, 111, 74, 0.1);
+}
+
+.ac-option-name {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.ac-option-meta {
+  grid-column: 1;
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+}
+
+.ac-option-add {
+  grid-row: 1 / span 2;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--accent-deep);
+  opacity: 0.75;
+}
+
+.ac-status {
+  margin: 0.55rem 0 0;
+  min-height: 1.25rem;
+  font-size: 0.88rem;
+  color: var(--ink-soft);
+}
+
+.candidate-search-panel,
+.candidate-filters {
+  display: none;
+}
+
+.ballot-rank-solo {
+  max-width: none;
+}
+
+@media (max-width: 640px) {
+  .ac-row {
+    grid-template-columns: 1fr;
+  }
+
+  .ac-birth {
+    min-width: 0;
+  }
 }
 
 .candidate-pool {

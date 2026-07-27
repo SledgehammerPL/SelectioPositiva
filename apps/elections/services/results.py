@@ -5,95 +5,151 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
+from django.contrib.auth import get_user_model
 from django.db.models import Count
 from django.utils import timezone
 
 from elections.models import (
     Ballot,
-    Candidate,
     ElectionResultCache,
     ElectoralDistrict,
     Office,
     VoterProfile,
 )
 from elections.services.schulze import SchulzeResult, compute_schulze
-from geo.models import TerritorialUnit
 
-
-def _descendant_unit_ids(unit: TerritorialUnit) -> set[int]:
-    ids: set[int] = {unit.pk}
-    stack = list(unit.children.all())
-    while stack:
-        node = stack.pop()
-        if node.pk in ids:
-            continue
-        ids.add(node.pk)
-        stack.extend(node.children.all())
-    return ids
+User = get_user_model()
 
 
 def eligible_voter_count(district: ElectoralDistrict) -> int:
-    unit_ids = _descendant_unit_ids(district.territorial_unit)
-    return VoterProfile.objects.filter(
-        polling_station__territorial_unit_id__in=unit_ids
-    ).count()
+    """
+    Liczba wyborców uprawnionych do głosowania w okręgu.
+
+    Wyborca jest uprawniony, gdy jego obwód (lub przodek) leży wśród
+    `district.territorial_units`.
+    """
+    district_unit_ids = list(
+        district.territorial_units.values_list("pk", flat=True)
+    )
+    if not district_unit_ids:
+        return 0
+
+    # Zbiór ID komisji, których obwód należy do okręgu
+    from geo.models import TerritorialUnit
+
+    def all_descendant_precinct_ids(unit_ids: list[int]) -> list[int]:
+        """ID wszystkich obwodów będących potomkami unit_ids."""
+        result = set()
+        queue = list(unit_ids)
+        while queue:
+            batch_ids = queue[:200]
+            queue = queue[200:]
+            children = list(
+                TerritorialUnit.objects.filter(parent_id__in=batch_ids)
+                .values_list("pk", "kind")
+            )
+            for pk, kind in children:
+                if kind == TerritorialUnit.Kind.PRECINCT:
+                    result.add(pk)
+                else:
+                    queue.append(pk)
+        # Jeśli same jednostki są obwodami — też je dodaj.
+        precincts = list(
+            TerritorialUnit.objects.filter(pk__in=unit_ids, kind=TerritorialUnit.Kind.PRECINCT)
+            .values_list("pk", flat=True)
+        )
+        result.update(precincts)
+        return list(result)
+
+    precinct_ids = all_descendant_precinct_ids(district_unit_ids)
+    if not precinct_ids:
+        return 0
+
+    return (
+        VoterProfile.objects
+        .filter(polling_station__precinct_id__in=precinct_ids)
+        .distinct()
+        .count()
+    )
+
+
+def _eligible_user_ids_for_district(district: ElectoralDistrict) -> list[int]:
+    """
+    IDs użytkowników uprawnionych do głosowania/kandydowania w okręgu.
+    Kryterium: ich komisja → precinct leży w poddrzewie territorial_units okręgu.
+    """
+    from elections.services.eligibility import get_eligible_districts
+    profiles = VoterProfile.objects.filter(
+        polling_station__isnull=False,
+    ).select_related("polling_station__precinct", "user")
+
+    result = []
+    district_unit_ids = set(district.territorial_units.values_list("pk", flat=True))
+
+    from elections.models import unit_is_descendant_of_any
+    for profile in profiles:
+        try:
+            precinct = profile.polling_station.precinct
+        except Exception:
+            continue
+        if unit_is_descendant_of_any(precinct, district_unit_ids):
+            result.append(profile.user_id)
+    return result
 
 
 def ballot_fingerprint(district: ElectoralDistrict) -> str:
     rows = (
         Ballot.objects.filter(district=district, is_voided=False)
         .order_by("id")
-        .values_list("id", "updated_at", "ranked_candidate_ids", "is_voided")
+        .values_list("id", "updated_at", "ranked_user_ids", "is_voided")
     )
     h = hashlib.sha256()
     for pk, updated, ranked, is_voided in rows:
         h.update(f"{pk}:{updated.isoformat()}:{ranked}:{is_voided}".encode())
-    h.update(f"|seats:{district.seats_count}|candidates:{district.pk}".encode())
-    cand = Candidate.objects.filter(district=district, is_active=True).order_by("id")
-    for c in cand:
-        h.update(f",{c.pk}".encode())
+    h.update(f"|seats:{district.seats_count}|district:{district.pk}".encode())
     return h.hexdigest()
 
 
 def compute_district_schulze(district: ElectoralDistrict) -> SchulzeResult:
-    candidates = list(
-        Candidate.objects.filter(district=district, is_active=True).order_by(
-            "display_order", "name"
-        )
-    )
-    candidate_ids = [c.pk for c in candidates]
+    user_ids = _eligible_user_ids_for_district(district)
     rankings = list(
         Ballot.objects.filter(district=district, is_voided=False).values_list(
-            "ranked_candidate_ids", flat=True
+            "ranked_user_ids", flat=True
         )
     )
-    active = set(candidate_ids)
-    cleaned = [[cid for cid in ranking if cid in active] for ranking in rankings]
-    return compute_schulze(
-        candidate_ids, cleaned, seats_count=district.seats_count
-    )
+    active = set(user_ids)
+    cleaned = [[uid for uid in ranking if uid in active] for ranking in rankings]
+    return compute_schulze(user_ids, cleaned, seats_count=district.seats_count)
 
 
-# Alias kompatybilności
 compute_office_schulze = compute_district_schulze
 
 
 def build_result_payload(
     district: ElectoralDistrict, result: SchulzeResult
 ) -> dict[str, Any]:
-    candidates = {
-        c.pk: c
-        for c in Candidate.objects.filter(district=district, is_active=True)
+    user_ids = result.candidate_ids
+    users = {
+        u.pk: u
+        for u in User.objects.filter(pk__in=user_ids).only(
+            "pk", "first_name", "last_name", "username"
+        )
     }
+
+    def user_label(uid: int) -> str:
+        u = users.get(uid)
+        if u is None:
+            return str(uid)
+        full = f"{u.first_name} {u.last_name}".strip()
+        return full or u.username
+
     eligible = eligible_voter_count(district)
     ballots = result.ballot_count
     turnout_pct = round((ballots / eligible) * 100, 1) if eligible else 0.0
 
     ranking_rows = []
     for row in result.ranking:
-        cand = candidates.get(row.candidate_id)
-        if cand is None:
-            continue
+        uid = row.candidate_id
         if row.is_tied_at_threshold:
             status = "Remis na progu mandatowym"
         elif row.is_elected:
@@ -102,8 +158,8 @@ def build_result_payload(
             status = "Nieobsadzony"
         ranking_rows.append(
             {
-                "candidate_id": row.candidate_id,
-                "name": cand.name,
+                "user_id": uid,
+                "name": user_label(uid),
                 "place": row.place,
                 "schulze_wins": row.schulze_wins,
                 "first_preferences": row.first_preferences,
@@ -115,11 +171,7 @@ def build_result_payload(
             }
         )
 
-    labels = {
-        str(cid): candidates[cid].name
-        for cid in result.candidate_ids
-        if cid in candidates
-    }
+    labels = {str(uid): user_label(uid) for uid in user_ids}
     elected_rows = [r for r in ranking_rows if r["is_elected"]]
     remaining_rows = [r for r in ranking_rows if not r["is_elected"]]
 
@@ -129,7 +181,6 @@ def build_result_payload(
             "slug": district.slug,
             "name": district.name,
             "seats_count": district.seats_count,
-            "territorial_unit_id": district.territorial_unit_id,
         },
         "office": {
             "id": district.office_id,
@@ -140,7 +191,7 @@ def build_result_payload(
         "ranking": ranking_rows,
         "elected": elected_rows,
         "remaining": remaining_rows,
-        "candidate_labels": labels,
+        "user_labels": labels,
         "turnout": {
             "ballots": ballots,
             "eligible_voters": eligible,
@@ -197,9 +248,7 @@ def get_cached_result(
 
 def recompute_all_results() -> int:
     count = 0
-    for district in ElectoralDistrict.objects.select_related(
-        "office", "territorial_unit"
-    ).iterator():
+    for district in ElectoralDistrict.objects.select_related("office").iterator():
         recompute_district_results(district)
         count += 1
     return count
@@ -212,18 +261,18 @@ def districts_for_filter(
     office_id: int | None = None,
     office_slug: str | None = None,
 ) -> list[ElectoralDistrict]:
-    qs = ElectoralDistrict.objects.select_related("office", "territorial_unit").annotate(
+    qs = ElectoralDistrict.objects.select_related("office").annotate(
         _ballot_count=Count("ballots")
     )
     if kind:
-        qs = qs.filter(territorial_unit__kind=kind)
+        qs = qs.filter(territorial_units__kind=kind)
     if unit_id:
-        qs = qs.filter(territorial_unit_id=unit_id)
+        qs = qs.filter(territorial_units__pk=unit_id)
     if office_id:
         qs = qs.filter(office_id=office_id)
     if office_slug:
         qs = qs.filter(office__slug=office_slug)
-    return list(qs.order_by("office__display_order", "display_order", "name"))
+    return list(qs.order_by("office__display_order", "display_order", "name").distinct())
 
 
 def offices_for_unit_filter(
@@ -234,9 +283,9 @@ def offices_for_unit_filter(
     """Urzędy mające okręgi w danym filtrze terytorialnym."""
     district_qs = ElectoralDistrict.objects.all()
     if kind:
-        district_qs = district_qs.filter(territorial_unit__kind=kind)
+        district_qs = district_qs.filter(territorial_units__kind=kind)
     if unit_id:
-        district_qs = district_qs.filter(territorial_unit_id=unit_id)
+        district_qs = district_qs.filter(territorial_units__pk=unit_id)
     office_ids = district_qs.values_list("office_id", flat=True).distinct()
     return list(
         Office.objects.filter(pk__in=office_ids).order_by("display_order", "name")

@@ -1,92 +1,91 @@
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
-from elections.models import Ballot, Candidate, ElectoralDistrict, Office, VoterProfile
+from elections.models import Ballot, ElectoralDistrict, Office, VoterProfile
 from elections.services import get_eligible_districts
 from elections.services.results import compute_district_schulze
 from geo.models import PollingStation, TerritorialUnit
 from users.services.station_change import change_user_polling_station
 
+User = get_user_model()
+
+
+def _make_hierarchy(prefix: str):
+    """Tworzy kraj → woj → gmina → obwód i zwraca słownik."""
+    country = TerritorialUnit.objects.create(
+        name="Polska", slug=f"{prefix}-polska", kind=TerritorialUnit.Kind.COUNTRY
+    )
+    woj = TerritorialUnit.objects.create(
+        name="Śląskie", slug=f"{prefix}-slask", kind=TerritorialUnit.Kind.VOIVODESHIP, parent=country
+    )
+    gmina = TerritorialUnit.objects.create(
+        name="Katowice", slug=f"{prefix}-ktw", kind=TerritorialUnit.Kind.MUNICIPALITY, parent=woj
+    )
+    precinct = TerritorialUnit.objects.create(
+        name="Obwód 1", slug=f"{prefix}-obwod1", kind=TerritorialUnit.Kind.PRECINCT, parent=gmina
+    )
+    return {"country": country, "woj": woj, "gmina": gmina, "precinct": precinct}
+
+
+def _make_station(code: str, precinct: TerritorialUnit) -> PollingStation:
+    return PollingStation.objects.create(
+        code=code,
+        name=f"Komisja {code}",
+        precinct=precinct,
+        address=f"ul. Testowa 1 ({code})",
+    )
+
+
+def _make_user(username: str, station: PollingStation, birth_year: int = 1985) -> User:
+    from datetime import date
+    u = User.objects.create_user(username, password="x", first_name=username.capitalize(), last_name="Testowy")
+    VoterProfile.objects.create(
+        user=u,
+        polling_station=station,
+        territorial_unit=station.precinct,
+        birth_date=date(birth_year, 6, 1),
+    )
+    return u
+
 
 class StationChangeTests(TestCase):
     def setUp(self):
-        self.country = TerritorialUnit.objects.create(
-            name="Polska",
-            slug="c-polska",
-            kind=TerritorialUnit.Kind.COUNTRY,
+        h1 = _make_hierarchy("sc1")
+        country = h1["country"]
+        woj2 = TerritorialUnit.objects.create(
+            name="Mazowieckie", slug="sc-maz", kind=TerritorialUnit.Kind.VOIVODESHIP, parent=country
         )
-        self.v1 = TerritorialUnit.objects.create(
-            name="Śląskie",
-            slug="c-slask",
-            kind=TerritorialUnit.Kind.VOIVODESHIP,
-            parent=self.country,
+        gmina2 = TerritorialUnit.objects.create(
+            name="Warszawa", slug="sc-waw-m", kind=TerritorialUnit.Kind.MUNICIPALITY, parent=woj2
         )
-        self.v2 = TerritorialUnit.objects.create(
-            name="Mazowieckie",
-            slug="c-maz",
-            kind=TerritorialUnit.Kind.VOIVODESHIP,
-            parent=self.country,
-        )
-        self.m1 = TerritorialUnit.objects.create(
-            name="Katowice",
-            slug="c-ktw",
-            kind=TerritorialUnit.Kind.MUNICIPALITY,
-            parent=self.v1,
-        )
-        self.m2 = TerritorialUnit.objects.create(
-            name="Warszawa",
-            slug="c-waw",
-            kind=TerritorialUnit.Kind.MUNICIPALITY,
-            parent=self.v2,
-        )
-        self.st1 = PollingStation.objects.create(
-            code="S1",
-            name="Komisja Katowice",
-            territorial_unit=self.m1,
-            address="Katowice 1",
-        )
-        self.st2 = PollingStation.objects.create(
-            code="S2",
-            name="Komisja Warszawa",
-            territorial_unit=self.m2,
-            address="Warszawa 1",
+        precinct2 = TerritorialUnit.objects.create(
+            name="Obwód 1 Waw", slug="sc-waw-obwod", kind=TerritorialUnit.Kind.PRECINCT, parent=gmina2
         )
 
-        self.office_national = Office.objects.create(name="Prezydent", slug="c-prez")
-        self.office_local = Office.objects.create(
-            name="Prezydent miasta", slug="c-prez-miasto"
-        )
+        self.st1 = _make_station("SC-S1", h1["precinct"])
+        self.st2 = _make_station("SC-S2", precinct2)
+
+        office_national = Office.objects.create(name="Prezydent", slug="sc-prez")
+        office_local = Office.objects.create(name="Prezydent miasta", slug="sc-prez-m")
+
         self.d_national = ElectoralDistrict.objects.create(
-            office=self.office_national,
-            name="Kraj",
-            slug="c-d-prez",
-            territorial_unit=self.country,
-            seats_count=1,
+            office=office_national, name="Kraj", slug="sc-d-prez", seats_count=1
         )
+        self.d_national.territorial_units.set([h1["country"]])
+
         self.d_local = ElectoralDistrict.objects.create(
-            office=self.office_local,
-            name="Katowice",
-            slug="c-d-ktw",
-            territorial_unit=self.m1,
-            seats_count=1,
+            office=office_local, name="Katowice", slug="sc-d-ktw", seats_count=1
         )
-        for district in (self.d_national, self.d_local):
-            Candidate.objects.create(district=district, name=f"A-{district.slug}")
-            Candidate.objects.create(district=district, name=f"B-{district.slug}")
+        self.d_local.territorial_units.set([h1["gmina"]])
 
-        User = get_user_model()
-        self.user = User.objects.create_user("changer", password="x")
-        VoterProfile.objects.create(user=self.user, polling_station=self.st1)
+        self.user = _make_user("sc_changer", self.st1)
 
         for district in (self.d_national, self.d_local):
-            ids = list(district.candidates.values_list("id", flat=True))
-            Ballot.objects.create(
-                user=self.user, district=district, ranked_candidate_ids=ids
-            )
+            Ballot.objects.create(user=self.user, district=district, ranked_user_ids=[self.user.pk])
 
     def test_change_voids_out_of_scope_and_keeps_national(self):
         result = change_user_polling_station(self.user, self.st2)
-        self.assertEqual({d.slug for d in result.voided_districts}, {"c-d-ktw"})
+        self.assertEqual({d.slug for d in result.voided_districts}, {"sc-d-ktw"})
         self.assertEqual(result.active_ballots, 1)
         self.assertEqual(result.voided_ballots, 1)
 
@@ -96,8 +95,8 @@ class StationChangeTests(TestCase):
         self.assertTrue(local.is_voided)
 
         eligible = set(get_eligible_districts(self.user).values_list("slug", flat=True))
-        self.assertIn("c-d-prez", eligible)
-        self.assertNotIn("c-d-ktw", eligible)
+        self.assertIn("sc-d-prez", eligible)
+        self.assertNotIn("sc-d-ktw", eligible)
 
         schulze = compute_district_schulze(self.d_local)
         self.assertEqual(schulze.ballot_count, 0)
@@ -105,7 +104,67 @@ class StationChangeTests(TestCase):
     def test_return_restores_voided_ballots(self):
         change_user_polling_station(self.user, self.st2)
         result = change_user_polling_station(self.user, self.st1)
-        self.assertEqual({d.slug for d in result.restored_districts}, {"c-d-ktw"})
+        self.assertEqual({d.slug for d in result.restored_districts}, {"sc-d-ktw"})
         local = Ballot.objects.get(user=self.user, district=self.d_local)
         self.assertFalse(local.is_voided)
         self.assertEqual(local.void_reason, "")
+
+
+class EligibilityByHierarchyTests(TestCase):
+    """Eligibility zależy od poddrzewa precinct → gmina → kraj."""
+
+    def setUp(self):
+        self.country = TerritorialUnit.objects.create(
+            name="Polska", slug="eh-pol", kind=TerritorialUnit.Kind.COUNTRY
+        )
+        woj = TerritorialUnit.objects.create(
+            name="Śląskie", slug="eh-slask", kind=TerritorialUnit.Kind.VOIVODESHIP, parent=self.country
+        )
+        self.gmina = TerritorialUnit.objects.create(
+            name="Katowice", slug="eh-ktw", kind=TerritorialUnit.Kind.MUNICIPALITY, parent=woj
+        )
+        self.precinct = TerritorialUnit.objects.create(
+            name="Obwód 1", slug="eh-obw1", kind=TerritorialUnit.Kind.PRECINCT, parent=self.gmina
+        )
+        woj2 = TerritorialUnit.objects.create(
+            name="Mazowieckie", slug="eh-maz", kind=TerritorialUnit.Kind.VOIVODESHIP, parent=self.country
+        )
+        gmina2 = TerritorialUnit.objects.create(
+            name="Warszawa", slug="eh-waw", kind=TerritorialUnit.Kind.MUNICIPALITY, parent=woj2
+        )
+        precinct2 = TerritorialUnit.objects.create(
+            name="Obwód 1 Waw", slug="eh-obw2", kind=TerritorialUnit.Kind.PRECINCT, parent=gmina2
+        )
+
+        self.station_ktw = _make_station("EH-KTW", self.precinct)
+        self.station_waw = _make_station("EH-WAW", precinct2)
+
+        office = Office.objects.create(name="Rada gminy", slug="eh-rada")
+        office_nat = Office.objects.create(name="Prezydent", slug="eh-prez")
+
+        self.district_local = ElectoralDistrict.objects.create(
+            office=office, name="Rada gminy Katowice", slug="eh-d-rada", seats_count=3
+        )
+        self.district_local.territorial_units.set([self.gmina])
+
+        self.district_nat = ElectoralDistrict.objects.create(
+            office=office_nat, name="Kraj", slug="eh-d-prez", seats_count=1
+        )
+        self.district_nat.territorial_units.set([self.country])
+
+    def test_ktw_user_eligible_for_local_and_national(self):
+        user = _make_user("eh_ktw", self.station_ktw)
+        eligible = set(get_eligible_districts(user).values_list("slug", flat=True))
+        self.assertIn("eh-d-rada", eligible)
+        self.assertIn("eh-d-prez", eligible)
+
+    def test_waw_user_not_eligible_for_ktw_local(self):
+        user = _make_user("eh_waw", self.station_waw)
+        eligible = set(get_eligible_districts(user).values_list("slug", flat=True))
+        self.assertNotIn("eh-d-rada", eligible)
+        self.assertIn("eh-d-prez", eligible)
+
+    def test_no_station_cannot_vote(self):
+        user = User.objects.create_user("eh_nostation", password="x")
+        eligible = get_eligible_districts(user)
+        self.assertFalse(eligible.exists())

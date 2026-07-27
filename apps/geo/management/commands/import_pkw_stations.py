@@ -39,8 +39,10 @@ BASE_DIR = Path(__file__).resolve().parents[4]
 DEFAULT_CSV = BASE_DIR / "data" / "pkw" / "katowice_obwody.csv"
 
 
-def _ensure_katowice_unit() -> TerritorialUnit:
-    """Hierarchia terytorialna pod komisje w Katowicach."""
+def _ensure_katowice_units() -> tuple[TerritorialUnit, list[TerritorialUnit]]:
+    """
+    Lokalizacja siedziby (gmina) + jednostki administracyjne na mapie.
+    """
     poland, _ = TerritorialUnit.objects.get_or_create(
         slug="polska",
         defaults={
@@ -61,27 +63,18 @@ def _ensure_katowice_unit() -> TerritorialUnit:
             "center_lng": "19.000000",
         },
     )
-    okreg, _ = TerritorialUnit.objects.get_or_create(
-        slug="okreg-katowice",
-        defaults={
-            "name": "Okręg wyborczy Katowice",
-            "kind": TerritorialUnit.Kind.DISTRICT,
-            "parent": slask,
-            "center_lat": "50.270000",
-            "center_lng": "19.050000",
-        },
-    )
     gmina, _ = TerritorialUnit.objects.update_or_create(
         slug="gmina-katowice",
         defaults={
             "name": "Gmina Katowice",
             "kind": TerritorialUnit.Kind.MUNICIPALITY,
-            "parent": okreg,
+            "parent": slask,
             "center_lat": "50.264900",
             "center_lng": "19.023800",
         },
     )
-    return gmina
+    served = [poland, slask, gmina]
+    return gmina, served
 
 
 def _station_code(teryt: str, numer: str) -> str:
@@ -228,7 +221,7 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING("Dry-run — bez zapisu."))
             return
 
-        unit = _ensure_katowice_unit()
+        location, served_units = _ensure_katowice_units()
         created = updated = 0
         for row in rows:
             teryt = row.get("teryt") or filt["teryt"]
@@ -238,14 +231,22 @@ class Command(BaseCommand):
             code = _station_code(teryt, numer)
             name = (row.get("siedziba") or f"Obwód nr {numer}")[:200]
             address = _build_address(row)
-            _, was_created = PollingStation.objects.update_or_create(
+            try:
+                number = int(str(numer).strip())
+            except ValueError:
+                number = None
+            streets = (row.get("opis_granic") or "").strip()
+            station, was_created = PollingStation.objects.update_or_create(
                 code=code,
                 defaults={
                     "name": name,
-                    "territorial_unit": unit,
+                    "number": number,
+                    "territorial_unit": location,
                     "address": address or f"Katowice, obwód {numer}",
+                    "streets_served": streets,
                 },
             )
+            station.served_units.set(served_units)
             if was_created:
                 created += 1
             else:
@@ -254,6 +255,6 @@ class Command(BaseCommand):
         self.stdout.write(
             self.style.SUCCESS(
                 f"OK: utworzono {created}, zaktualizowano {updated}. "
-                f"Jednostka: {unit}."
+                f"Lokalizacja: {location}; obsługiwane jednostki: {len(served_units)}."
             )
         )

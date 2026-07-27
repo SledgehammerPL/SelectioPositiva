@@ -1,17 +1,21 @@
 """
-Zasiewa hierarchię terytorialną + urzędy + okręgi z seats_count + demo użytkownika.
+Zasiewa dane demo: jednostki terytorialne → obwody → komisje → okręgi → użytkownicy.
 
 Użycie: python manage.py seed_demo
 """
 
 from __future__ import annotations
 
+from datetime import date
+
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
-from elections.models import Candidate, ElectoralDistrict, Office, VoterProfile
+from elections.models import ElectoralDistrict, Office, Party, VoterProfile
 from geo.models import PollingStation, TerritorialUnit
+
+User = get_user_model()
 
 
 def _box(west: float, south: float, east: float, north: float) -> dict:
@@ -29,107 +33,64 @@ def _box(west: float, south: float, east: float, north: float) -> dict:
     }
 
 
+def _unit(slug, name, kind, parent=None, boundary=None, lat=None, lng=None):
+    defaults = {"name": name, "kind": kind, "parent": parent}
+    if boundary:
+        defaults["boundary"] = boundary
+    if lat:
+        defaults["center_lat"] = lat
+    if lng:
+        defaults["center_lng"] = lng
+    obj, _ = TerritorialUnit.objects.update_or_create(slug=slug, defaults=defaults)
+    return obj
+
+
 class Command(BaseCommand):
-    help = "Tworzy dane demo z okręgami wyborczymi (seats_count na okręgu)."
+    help = "Tworzy dane demo (jednostki, okręgi, komisje, użytkownicy-kandydaci)."
 
     @transaction.atomic
     def handle(self, *args, **options):
-        poland, _ = TerritorialUnit.objects.update_or_create(
-            slug="polska",
-            defaults={
-                "name": "Polska",
-                "kind": TerritorialUnit.Kind.COUNTRY,
-                "parent": None,
-                "boundary": _box(14.1, 49.0, 24.2, 54.9),
-                "center_lat": "52.100000",
-                "center_lng": "19.400000",
-            },
+        # ── Jednostki administracyjne ────────────────────────────────────────
+        poland = _unit(
+            "polska", "Polska", TerritorialUnit.Kind.COUNTRY,
+            boundary=_box(14.1, 49.0, 24.2, 54.9), lat="52.100000", lng="19.400000",
         )
-        slask, _ = TerritorialUnit.objects.update_or_create(
-            slug="slaskie",
-            defaults={
-                "name": "Województwo Śląskie",
-                "kind": TerritorialUnit.Kind.VOIVODESHIP,
-                "parent": poland,
-                "boundary": _box(18.0, 49.35, 19.85, 50.95),
-                "center_lat": "50.250000",
-                "center_lng": "19.000000",
-            },
+        slask = _unit(
+            "slaskie", "Województwo Śląskie", TerritorialUnit.Kind.VOIVODESHIP, poland,
+            boundary=_box(18.0, 49.35, 19.85, 50.95), lat="50.250000", lng="19.000000",
         )
-        okreg, _ = TerritorialUnit.objects.update_or_create(
-            slug="okreg-katowice",
-            defaults={
-                "name": "Okręg wyborczy Katowice",
-                "kind": TerritorialUnit.Kind.DISTRICT,
-                "parent": slask,
-                "boundary": _box(18.80, 50.12, 19.40, 50.42),
-                "center_lat": "50.270000",
-                "center_lng": "19.050000",
-            },
+        gmina = _unit(
+            "gmina-katowice", "Gmina Katowice", TerritorialUnit.Kind.MUNICIPALITY, slask,
+            boundary=_box(18.92, 50.20, 19.15, 50.33), lat="50.264900", lng="19.023800",
         )
-        gmina, _ = TerritorialUnit.objects.update_or_create(
-            slug="gmina-katowice",
-            defaults={
-                "name": "Gmina Katowice",
-                "kind": TerritorialUnit.Kind.MUNICIPALITY,
-                "parent": okreg,
-                "boundary": _box(18.92, 50.20, 19.15, 50.33),
-                "center_lat": "50.264900",
-                "center_lng": "19.023800",
-            },
+        mazowsze = _unit(
+            "mazowieckie", "Województwo Mazowieckie", TerritorialUnit.Kind.VOIVODESHIP, poland,
+            boundary=_box(19.5, 51.5, 22.0, 53.5), lat="52.230000", lng="21.010000",
         )
-        okreg_miejski, _ = TerritorialUnit.objects.update_or_create(
-            slug="okreg-miejski-katowice",
-            defaults={
-                "name": "Okręg miejski Katowice",
-                "kind": TerritorialUnit.Kind.DISTRICT,
-                "parent": gmina,
-                "boundary": _box(18.96, 50.22, 19.10, 50.31),
-                "center_lat": "50.260000",
-                "center_lng": "19.020000",
-            },
+        gmina_waw = _unit(
+            "gmina-warszawa", "Gmina Warszawa", TerritorialUnit.Kind.MUNICIPALITY, mazowsze,
+            boundary=_box(20.85, 52.15, 21.2, 52.35), lat="52.229700", lng="21.012200",
         )
 
-        mazowsze, _ = TerritorialUnit.objects.update_or_create(
-            slug="mazowieckie",
-            defaults={
-                "name": "Województwo Mazowieckie",
-                "kind": TerritorialUnit.Kind.VOIVODESHIP,
-                "parent": poland,
-                "boundary": _box(19.5, 51.5, 22.0, 53.5),
-                "center_lat": "52.230000",
-                "center_lng": "21.010000",
-            },
+        # ── Obwody wyborcze (precinct) — podpoziom gminy ─────────────────────
+        precinct_ktw = _unit(
+            "obwod-katowice-1", "Obwód 1 Katowice (Śródmieście)",
+            TerritorialUnit.Kind.PRECINCT, gmina,
         )
-        okreg_waw, _ = TerritorialUnit.objects.update_or_create(
-            slug="okreg-warszawa",
-            defaults={
-                "name": "Okręg wyborczy Warszawa",
-                "kind": TerritorialUnit.Kind.DISTRICT,
-                "parent": mazowsze,
-                "boundary": _box(20.7, 52.05, 21.3, 52.4),
-                "center_lat": "52.230000",
-                "center_lng": "21.010000",
-            },
-        )
-        gmina_waw, _ = TerritorialUnit.objects.update_or_create(
-            slug="gmina-warszawa",
-            defaults={
-                "name": "Gmina Warszawa",
-                "kind": TerritorialUnit.Kind.MUNICIPALITY,
-                "parent": okreg_waw,
-                "boundary": _box(20.85, 52.15, 21.2, 52.35),
-                "center_lat": "52.229700",
-                "center_lng": "21.012200",
-            },
+        precinct_waw = _unit(
+            "obwod-warszawa-1", "Obwód 1 Warszawa (Śródmieście)",
+            TerritorialUnit.Kind.PRECINCT, gmina_waw,
         )
 
+        # ── Komisje wyborcze (przypisane do obwodów) ─────────────────────────
         station, _ = PollingStation.objects.update_or_create(
             code="KTW-001",
             defaults={
                 "name": "Obwodowa Komisja Wyborcza nr 1",
-                "territorial_unit": okreg_miejski,
+                "number": 1,
+                "precinct": precinct_ktw,
                 "address": "ul. Młyńska 4, 40-098 Katowice",
+                "streets_served": "ul. Młyńska, Stawowa (okolice rynku).",
                 "latitude": "50.259100",
                 "longitude": "19.021600",
             },
@@ -138,14 +99,16 @@ class Command(BaseCommand):
             code="WAW-001",
             defaults={
                 "name": "Obwodowa Komisja Wyborcza nr 1 — Warszawa",
-                "territorial_unit": gmina_waw,
+                "number": 1,
+                "precinct": precinct_waw,
                 "address": "ul. Senatorska 2, 00-075 Warszawa",
+                "streets_served": "ul. Senatorska, Miodowa (fragment).",
                 "latitude": "52.244500",
                 "longitude": "21.013000",
             },
         )
 
-        # Urzędy (bez terytorium / seats)
+        # ── Urzędy ───────────────────────────────────────────────────────────
         offices_data = [
             ("prezydent-rp", "Prezydent RP", "Wybory ogólnokrajowe.", 1),
             ("eurodeputowany", "Poseł do Europarlamentu", "Mandaty europejskie.", 2),
@@ -153,6 +116,9 @@ class Command(BaseCommand):
             ("senator", "Senator RP", "Wybory do Senatu.", 4),
             ("prezydent-miasta", "Prezydent Miasta", "Wybory samorządowe — prezydent.", 5),
             ("radny", "Radny Rady Miasta", "Wybory samorządowe — rada.", 6),
+            ("radny-gminy", "Radny rady gminy / miasta", "Okręgi do rad gmin.", 50),
+            ("radny-powiatu", "Radny rady powiatu", "Okręgi do rad powiatów.", 40),
+            ("radny-sejmiku", "Radny sejmiku województwa", "Okręgi do sejmików.", 30),
         ]
         offices: dict[str, Office] = {}
         for slug, name, desc, order in offices_data:
@@ -167,120 +133,88 @@ class Command(BaseCommand):
             )
             offices[slug] = office
 
-        # Okręgi: (district_slug, office_slug, name, unit, seats, candidates, order)
+        # ── Partie ───────────────────────────────────────────────────────────
+        parties = {}
+        for slug, pname, abbr, order in [
+            ("partia-a", "Partia Demo A", "PDA", 1),
+            ("partia-b", "Partia Demo B", "PDB", 2),
+        ]:
+            party, _ = Party.objects.update_or_create(
+                slug=slug,
+                defaults={
+                    "name": pname,
+                    "abbreviation": abbr,
+                    "is_active": True,
+                    "display_order": order,
+                },
+            )
+            parties[slug] = party
+
+        # ── Okręgi wyborcze → territorial_units (M2M) ───────────────────────
+        # Każdy okręg jest powiązany z węzłem hierarchii, którego obwody są uprawnione.
         districts_spec = [
-            (
-                "prezydent-rp-kraj",
-                "prezydent-rp",
-                "Okręg ogólnopolski",
-                poland,
-                1,
-                ["Anna Kowalska", "Jan Nowak", "Piotr Wiśniewski", "Maria Zielińska"],
-                1,
-            ),
-            (
-                "euro-slask",
-                "eurodeputowany",
-                "Okręg — Województwo Śląskie",
-                slask,
-                2,
-                ["Ewa Maj", "Tomasz Król", "Barbara Lewandowska", "Igor Nowicki"],
-                1,
-            ),
-            (
-                "sejm-31-katowice",
-                "posel-sejm",
-                "Okręg nr 31 — Katowice",
-                okreg,
-                12,
-                [
-                    "Krzysztof Wójcik",
-                    "Agnieszka Kamińska",
-                    "Michał Szymański",
-                    "Joanna Dąbrowska",
-                    "Paweł Lis",
-                    "Ewelina Bąk",
-                ],
-                1,
-            ),
-            (
-                "senat-katowice",
-                "senator",
-                "Okręg senacki Katowice",
-                okreg,
-                1,
-                ["Paweł Jankowski", "Natalia Woźniak", "Adam Kaczmarek"],
-                1,
-            ),
-            (
-                "prezydent-katowice",
-                "prezydent-miasta",
-                "Gmina Katowice",
-                gmina,
-                1,
-                ["Magdalena Pawlak", "Robert Grabowski", "Karolina Michalska"],
-                1,
-            ),
-            (
-                "rada-katowice",
-                "radny",
-                "Okręg miejski Katowice",
-                okreg_miejski,
-                3,
-                [
-                    "Łukasz Zając",
-                    "Dorota Sikora",
-                    "Marcin Walczak",
-                    "Aleksandra Górska",
-                    "Igor Czarnecki",
-                ],
-                1,
-            ),
-            (
-                "prezydent-warszawa",
-                "prezydent-miasta",
-                "Gmina Warszawa",
-                gmina_waw,
-                1,
-                ["Hanna Nowicka", "Stefan Borkowski", "Julia Malinowska"],
-                2,
-            ),
-            (
-                "sejm-19-warszawa",
-                "posel-sejm",
-                "Okręg nr 19 — Warszawa",
-                okreg_waw,
-                20,
-                [
-                    "Adam Warszawski",
-                    "Beata Stołeczna",
-                    "Cezary Mazur",
-                    "Danuta Wisła",
-                    "Emil Praga",
-                ],
-                2,
-            ),
+            # (slug, office_slug, name, [units], seats, min_age, order)
+            ("prezydent-rp-kraj", "prezydent-rp", "Okręg ogólnopolski", [poland], 1, 35, 1),
+            ("euro-slask", "eurodeputowany", "Okręg — Województwo Śląskie", [slask], 2, 18, 1),
+            ("sejm-31-katowice", "posel-sejm", "Okręg nr 31 — Katowice", [poland], 12, 18, 1),
+            ("senat-katowice", "senator", "Okręg senacki Katowice", [poland], 1, 30, 1),
+            ("prezydent-katowice", "prezydent-miasta", "Gmina Katowice", [gmina], 1, 18, 1),
+            ("rada-katowice", "radny", "Okręg miejski Katowice", [gmina], 3, 18, 1),
+            ("prezydent-warszawa", "prezydent-miasta", "Gmina Warszawa", [gmina_waw], 1, 18, 2),
+            ("sejm-19-warszawa", "posel-sejm", "Okręg nr 19 — Warszawa", [poland], 20, 18, 2),
         ]
 
-        for dslug, oslug, dname, unit, seats, candidates, order in districts_spec:
+        created_districts: dict[str, ElectoralDistrict] = {}
+        for dslug, oslug, dname, units, seats, min_age, order in districts_spec:
             district, _ = ElectoralDistrict.objects.update_or_create(
                 slug=dslug,
                 defaults={
                     "office": offices[oslug],
                     "name": dname,
-                    "territorial_unit": unit,
                     "seats_count": seats,
+                    "min_age": min_age,
                     "display_order": order,
                 },
             )
-            for idx, cname in enumerate(candidates):
-                Candidate.objects.update_or_create(
-                    district=district,
-                    name=cname,
-                    defaults={"is_active": True, "display_order": idx, "bio": ""},
-                )
+            district.territorial_units.set(units)
+            created_districts[dslug] = district
 
-        User = get_user_model()
+        # ── Użytkownicy-kandydaci demo ────────────────────────────────────────
+        candidates_data = [
+            ("anna",     "Kowalska",     date(1975, 3, 15),  station),
+            ("jan",      "Nowak",        date(1968, 7, 22),  station),
+            ("piotr",    "Wisniewski",   date(1982, 1, 5),   station),
+            ("maria",    "Zielinska",    date(1990, 11, 30), station),
+            ("ewa",      "Maj",          date(1978, 6, 10),  station),
+            ("tomasz",   "Krol",         date(1985, 9, 18),  station),
+            ("barbara",  "Lewandowska",  date(1972, 4, 25),  station),
+            ("hanna",    "Nowicka",      date(1980, 2, 14),  station_waw),
+            ("stefan",   "Borkowski",    date(1965, 12, 3),  station_waw),
+            ("julia",    "Malinowska",   date(1993, 8, 27),  station_waw),
+            ("adam",     "Warszawski",   date(1977, 5, 9),   station_waw),
+        ]
+        for username, last_name, birth_date, st in candidates_data:
+            u, created = User.objects.get_or_create(
+                username=username,
+                defaults={
+                    "first_name": username.capitalize(),
+                    "last_name": last_name,
+                    "email": f"{username}@selectio.local",
+                },
+            )
+            if created:
+                u.set_password("demo1234")
+                u.save()
+            VoterProfile.objects.update_or_create(
+                user=u,
+                defaults={
+                    "polling_station": st,
+                    "territorial_unit": st.precinct,
+                    "birth_date": birth_date,
+                },
+            )
+
+        # ── Demo-wyborca główny ───────────────────────────────────────────────
         user, created = User.objects.get_or_create(
             username="demo",
             defaults={
@@ -293,12 +227,24 @@ class Command(BaseCommand):
             user.set_password("demo1234")
             user.save()
 
+        # Preferuj prawdziwą komisję PKW Katowice, jeśli jest po imporcie.
+        pkw = PollingStation.objects.filter(code="246901-1").first()
+        effective_station = pkw or station
+        effective_precinct = effective_station.precinct or precinct_ktw
+
         VoterProfile.objects.update_or_create(
             user=user,
-            defaults={"polling_station": station},
+            defaults={
+                "polling_station": effective_station,
+                "territorial_unit": effective_precinct,
+                "birth_date": date(1990, 5, 12),
+            },
         )
 
         self.stdout.write(self.style.SUCCESS("Seed demo OK."))
         self.stdout.write("  Login: demo / demo1234")
-        self.stdout.write(f"  Komisja: {station}")
-        self.stdout.write(f"  Alternatywna komisja: {station_waw}")
+        self.stdout.write(f"  Komisja: {effective_station}")
+        self.stdout.write(f"  Alternatywna komisja (WAW): {station_waw}")
+        self.stdout.write(
+            f"  Kandydaci demo: {', '.join(u for u, *_ in candidates_data)}"
+        )

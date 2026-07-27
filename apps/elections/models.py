@@ -1,9 +1,18 @@
 from django.conf import settings
 from django.db import models
 
+from geo.models import TerritorialUnit
+
 
 class VoterProfile(models.Model):
-    """Profil wyborcy — przypisanie użytkownika do komisji wyborczej."""
+    """
+    Profil wyborcy.
+
+    Każdy użytkownik ma dokładnie jeden profil.
+    `territorial_unit` to węzeł hierarchii (kraj, gmina, obwód…).
+    Aby głosować, użytkownik musi mieć powiązaną `polling_station`
+    (komisja wyborczą → obwód → …).
+    """
 
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
@@ -11,11 +20,33 @@ class VoterProfile(models.Model):
         related_name="voter_profile",
         verbose_name="użytkownik",
     )
+    territorial_unit = models.ForeignKey(
+        "geo.TerritorialUnit",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="residents",
+        verbose_name="jednostka terytorialna",
+        help_text=(
+            "Węzeł hierarchii, z którym powiązany jest wyborca. "
+            "Minimum: kraj. Jeśli ustawiona komisja, obwód komisji "
+            "jest używany do wyznaczenia uprawnień."
+        ),
+    )
     polling_station = models.ForeignKey(
         "geo.PollingStation",
-        on_delete=models.PROTECT,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
         related_name="voters",
         verbose_name="komisja wyborcza",
+        help_text="Wymagana do głosowania. Komisja musi należeć do obwodu będącego potomkiem territorial_unit.",
+    )
+    birth_date = models.DateField(
+        "data urodzenia",
+        null=True,
+        blank=True,
+        help_text="Wymagana do weryfikacji limitu wieku w okręgu wyborczym.",
     )
 
     class Meta:
@@ -23,7 +54,41 @@ class VoterProfile(models.Model):
         verbose_name_plural = "profile wyborców"
 
     def __str__(self) -> str:
-        return f"{self.user} @ {self.polling_station}"
+        if self.polling_station_id:
+            return f"{self.user} @ {self.polling_station}"
+        return f"{self.user} ({self.territorial_unit})"
+
+    def can_vote(self) -> bool:
+        """Użytkownik może głosować tylko jeśli ma przypisaną komisję."""
+        return self.polling_station_id is not None
+
+    def effective_unit(self) -> "TerritorialUnit":
+        """Węzeł używany do wyznaczania uprawnień — obwód komisji lub territorial_unit."""
+        if self.polling_station_id and self.polling_station.precinct_id:
+            return self.polling_station.precinct
+        return self.territorial_unit
+
+
+class Party(models.Model):
+    """Partia polityczna / ugrupowanie."""
+
+    name = models.CharField("nazwa", max_length=200)
+    slug = models.SlugField("slug", max_length=200, unique=True)
+    abbreviation = models.CharField("skrót", max_length=32, blank=True)
+    is_active = models.BooleanField("aktywna", default=True)
+    display_order = models.PositiveIntegerField("kolejność", default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "partia"
+        verbose_name_plural = "partie"
+        ordering = ["display_order", "name"]
+
+    def __str__(self) -> str:
+        if self.abbreviation:
+            return f"{self.name} ({self.abbreviation})"
+        return self.name
 
 
 class Office(models.Model):
@@ -52,9 +117,18 @@ class Office(models.Model):
 
 class ElectoralDistrict(models.Model):
     """
-    Okręg wyborczy powiązany z urzędem i jednostką terytorialną.
+    Okręg wyborczy.
 
-    Liczba mandatów (seats_count) jest atrybutem okręgu, nie urzędu.
+    `territorial_units` (M2M) — węzły hierarchii należące do okręgu.
+    Wyborca jest uprawniony do głosowania, gdy jego obwód (lub przodek)
+    leży wśród tych węzłów.
+
+    Przykłady:
+    - Prezydent RP → [kraj Polska]
+    - Sejm okręg 31 → [powiat katowicki, powiat bielski, …]
+    - Rada gminy okręg 3 → [obwód 3 w gminie Katowice]
+
+    `min_age` — minimalne wymagane lat do głosowania i do kandydowania.
     """
 
     office = models.ForeignKey(
@@ -65,16 +139,26 @@ class ElectoralDistrict(models.Model):
     )
     name = models.CharField("nazwa", max_length=200)
     slug = models.SlugField("slug", max_length=200, unique=True)
-    territorial_unit = models.ForeignKey(
+    territorial_units = models.ManyToManyField(
         "geo.TerritorialUnit",
-        on_delete=models.PROTECT,
         related_name="electoral_districts",
-        verbose_name="jednostka terytorialna",
+        verbose_name="jednostki terytorialne",
+        blank=True,
+        help_text=(
+            "Węzły hierarchii należące do tego okręgu. "
+            "Wyborca jest uprawniony, gdy jego obwód leży w poddrzewie "
+            "któregoś z tych węzłów."
+        ),
     )
     seats_count = models.PositiveIntegerField(
         "liczba mandatów",
         default=1,
         help_text="Ile mandatów obsadzanych jest w tym okręgu (metoda Schulzego).",
+    )
+    min_age = models.PositiveSmallIntegerField(
+        "minimalny wiek",
+        default=18,
+        help_text="Minimalny wiek (w latach) wymagany do głosowania i kandydowania w tym okręgu.",
     )
     display_order = models.PositiveIntegerField("kolejność", default=0)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -93,48 +177,41 @@ class ElectoralDistrict(models.Model):
         return self.office.is_open
 
 
-class Candidate(models.Model):
-    """Kandydat w konkretnym okręgu wyborczym."""
+def _ancestor_of_kind(
+    unit: TerritorialUnit | None, kind: str
+) -> TerritorialUnit | None:
+    current = unit
+    seen: set[int] = set()
+    while current is not None and current.pk not in seen:
+        if current.kind == kind:
+            return current
+        seen.add(current.pk)
+        current = current.parent
+    return None
 
-    district = models.ForeignKey(
-        ElectoralDistrict,
-        on_delete=models.CASCADE,
-        related_name="candidates",
-        verbose_name="okręg",
-    )
-    name = models.CharField("imię i nazwisko", max_length=200)
-    committee = models.CharField(
-        "komitet",
-        max_length=200,
-        blank=True,
-        help_text="Nazwa komitetu wyborczego (opcjonalnie).",
-    )
-    bio = models.TextField("biogram", blank=True)
-    is_active = models.BooleanField(
-        "aktywny",
-        default=True,
-        help_text="Nieaktywni kandydaci nie biorą udziału w nowych głosowaniach.",
-    )
-    display_order = models.PositiveIntegerField("kolejność wyświetlania", default=0)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
 
-    class Meta:
-        verbose_name = "kandydat"
-        verbose_name_plural = "kandydaci"
-        ordering = ["district", "display_order", "name"]
-
-    def __str__(self) -> str:
-        return f"{self.name} ({self.district})"
+def unit_is_descendant_of_any(unit: TerritorialUnit, ancestor_ids: set[int]) -> bool:
+    """
+    Zwraca True, gdy `unit` lub któryś z jego przodków należy do `ancestor_ids`.
+    Używane do sprawdzania, czy obwód wyborcy należy do okręgu.
+    """
+    current: TerritorialUnit | None = unit
+    seen: set[int] = set()
+    while current is not None and current.pk not in seen:
+        if current.pk in ancestor_ids:
+            return True
+        seen.add(current.pk)
+        current = current.parent
+    return False
 
 
 class Ballot(models.Model):
     """
     Głos użytkownika (ranking Schulzego) w danym okręgu.
 
-    Przechowuje tylko jawnie uporządkowanych kandydatów (`ranked_candidate_ids`).
-    Pozostali kandydaci okręgu są traktowani jako nieuporządkowani (unranked).
-    Przy zmianie komisji głos poza zasięgiem jest zamrażany (is_voided), nie usuwany.
+    `ranked_user_ids` — lista ID użytkowników od najwyżej preferowanego.
+    Pozostali uprawnieni użytkownicy okręgu są traktowani jako unranked.
+    Przy zmianie komisji głos poza zasięgiem jest zamrażany (is_voided).
     """
 
     class VoidReason(models.TextChoices):
@@ -155,12 +232,12 @@ class Ballot(models.Model):
         related_name="ballots",
         verbose_name="okręg",
     )
-    ranked_candidate_ids = models.JSONField(
-        "uporządkowani kandydaci",
+    ranked_user_ids = models.JSONField(
+        "ranking użytkowników",
         default=list,
         help_text=(
-            "Lista ID kandydatów od najwyżej preferowanego. "
-            "Pozostali kandydaci okręgu = nieuporządkowani (unranked)."
+            "Lista ID użytkowników od najwyżej preferowanego. "
+            "Pozostali uprawnieni użytkownicy okręgu = nieuporządkowani (unranked)."
         ),
     )
     is_voided = models.BooleanField(
@@ -197,11 +274,6 @@ class Ballot(models.Model):
     def __str__(self) -> str:
         mark = " [zawieszony]" if self.is_voided else ""
         return f"Głos {self.user} → {self.district}{mark}"
-
-    @property
-    def ranking(self) -> list:
-        """Alias wsteczny."""
-        return self.ranked_candidate_ids
 
 
 class ElectionResultCache(models.Model):

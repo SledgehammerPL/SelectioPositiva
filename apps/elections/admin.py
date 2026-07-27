@@ -1,43 +1,40 @@
 from django.contrib import admin
+from django.contrib.auth import get_user_model
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
-from django.contrib.auth.models import User
 
 from .models import (
     Ballot,
-    Candidate,
     ElectionResultCache,
     ElectoralDistrict,
     Office,
+    Party,
     VoterProfile,
 )
+
+User = get_user_model()
 
 
 class VoterProfileInline(admin.StackedInline):
     model = VoterProfile
     can_delete = False
     fk_name = "user"
-    raw_id_fields = ("polling_station",)
+    raw_id_fields = ("polling_station", "territorial_unit")
 
 
-class UserAdmin(BaseUserAdmin):
+class UserWithProfileAdmin(BaseUserAdmin):
     inlines = (VoterProfileInline,)
 
 
 admin.site.unregister(User)
-admin.site.register(User, UserAdmin)
+admin.site.register(User, UserWithProfileAdmin)
 
 
-class ElectoralDistrictInline(admin.TabularInline):
-    model = ElectoralDistrict
-    extra = 0
+@admin.register(Party)
+class PartyAdmin(admin.ModelAdmin):
+    list_display = ("name", "abbreviation", "is_active", "display_order")
+    list_filter = ("is_active",)
+    search_fields = ("name", "slug", "abbreviation")
     prepopulated_fields = {"slug": ("name",)}
-    raw_id_fields = ("territorial_unit",)
-
-
-class CandidateInline(admin.TabularInline):
-    model = Candidate
-    extra = 1
-    fields = ("name", "committee", "is_active", "display_order")
 
 
 @admin.register(Office)
@@ -46,31 +43,15 @@ class OfficeAdmin(admin.ModelAdmin):
     list_filter = ("is_open",)
     search_fields = ("name", "slug")
     prepopulated_fields = {"slug": ("name",)}
-    inlines = (ElectoralDistrictInline,)
 
 
 @admin.register(ElectoralDistrict)
 class ElectoralDistrictAdmin(admin.ModelAdmin):
-    list_display = (
-        "name",
-        "office",
-        "territorial_unit",
-        "seats_count",
-        "display_order",
-    )
-    list_filter = ("office", "territorial_unit__kind")
+    list_display = ("name", "office", "seats_count", "min_age", "display_order")
+    list_filter = ("office",)
     search_fields = ("name", "slug", "office__name")
     prepopulated_fields = {"slug": ("name",)}
-    raw_id_fields = ("office", "territorial_unit")
-    inlines = (CandidateInline,)
-
-
-@admin.register(Candidate)
-class CandidateAdmin(admin.ModelAdmin):
-    list_display = ("name", "committee", "district", "is_active", "display_order")
-    list_filter = ("is_active", "district__office")
-    search_fields = ("name", "committee")
-    raw_id_fields = ("district",)
+    filter_horizontal = ("territorial_units",)
 
 
 @admin.register(Ballot)
@@ -84,8 +65,8 @@ class BallotAdmin(admin.ModelAdmin):
 
 @admin.register(VoterProfile)
 class VoterProfileAdmin(admin.ModelAdmin):
-    list_display = ("user", "polling_station")
-    raw_id_fields = ("user", "polling_station")
+    list_display = ("user", "polling_station", "territorial_unit")
+    raw_id_fields = ("user", "polling_station", "territorial_unit")
 
 
 @admin.register(ElectionResultCache)
