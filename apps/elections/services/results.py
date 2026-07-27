@@ -106,7 +106,6 @@ def build_result_payload(
     users = {
         u.pk: u
         for u in User.objects.filter(pk__in=user_ids)
-        .select_related("voter_profile")
         .only("pk", "first_name", "last_name", "email")
     }
 

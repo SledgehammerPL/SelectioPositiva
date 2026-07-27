@@ -5,7 +5,6 @@ from django.test import SimpleTestCase, TestCase
 
 from elections.models import (
     Ballot,
-    Candidate,
     ElectionResultCache,
     ElectoralDistrict,
     Office,
@@ -77,36 +76,24 @@ class ResultsCacheTests(TestCase):
             slug="test-polska",
             kind=TerritorialUnit.Kind.COUNTRY,
         )
-        self.gmina = TerritorialUnit.objects.create(
-            name="Gmina Test",
-            slug="test-gmina",
-            kind=TerritorialUnit.Kind.MUNICIPALITY,
-            parent=self.unit,
-        )
         self.office = Office.objects.create(name="Test Office", slug="test-office")
         self.district = ElectoralDistrict.objects.create(
             office=self.office,
             name="Okręg testowy",
             slug="test-district",
-            territorial_unit=self.unit,
             seats_count=1,
         )
-        self.c1 = Candidate.objects.create(
-            first_name="Alpha",
-            last_name="Jeden",
-            citizenship=self.unit,
-            residence_municipality=self.gmina,
-            display_order=0,
-        )
-        self.c2 = Candidate.objects.create(
-            first_name="Beta",
-            last_name="Dwa",
-            citizenship=self.unit,
-            residence_municipality=self.gmina,
-            display_order=1,
-        )
+        self.district.territorial_units.set([self.unit])
+
         User = get_user_model()
-        self.user = User.objects.create_user("voter1", password="x")
+
+        self.c1 = User.objects.create_user(
+            "voter_c1", password="x", first_name="Alpha", last_name="Jeden"
+        )
+        self.c2 = User.objects.create_user(
+            "voter_c2", password="x", first_name="Beta", last_name="Dwa"
+        )
+        self.user = User.objects.create_user("balloter", password="x")
 
     def test_cache_reused_until_vote(self):
         payload1 = get_cached_result(self.district)
@@ -122,7 +109,7 @@ class ResultsCacheTests(TestCase):
         Ballot.objects.create(
             user=self.user,
             district=self.district,
-            ranked_candidate_ids=[self.c1.pk, self.c2.pk],
+            ranked_user_ids=[self.c1.pk, self.c2.pk],
         )
         invalidate_district_results(self.district)
         cache.refresh_from_db()
@@ -130,5 +117,6 @@ class ResultsCacheTests(TestCase):
 
         payload3 = get_cached_result(self.district)
         self.assertEqual(payload3["schulze"]["ballot_count"], 1)
-        self.assertEqual(payload3["elected"][0]["candidate_id"], self.c1.pk)
+        self.assertEqual(payload3["elected"][0]["user_id"], self.c1.pk)
         self.assertEqual(payload3["district"]["seats_count"], 1)
+
