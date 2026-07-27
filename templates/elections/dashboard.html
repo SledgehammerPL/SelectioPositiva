@@ -7,18 +7,25 @@
   <div>
     <p class="eyebrow">Twój okręg wyborczy</p>
     <h1>Panel głosowania</h1>
-    {% if profile %}
+    {% if profile and profile.can_vote %}
     <p class="lede">
-      Komisja <strong>{{ profile.polling_station.name }}</strong>
-      ({{ profile.polling_station.code }}) · {{ profile.polling_station.address }}
-      · <a href="{% url 'change_station' %}">Zmień komisję</a>
+      Obwód <strong>{{ profile.territorial_unit }}</strong>
+      {% if display_station %}
+      · komisja: {{ display_station.name }} ({{ display_station.code }})
+      {% endif %}
+      · <a href="{% url 'change_station' %}">Zmień obwód</a>
     </p>
     <div class="ballot-summary-strip">
       <span>Głosy aktywne: <strong>{{ ballot_counts.active }}</strong></span>
       <span>Głosy zawieszone/unieważnione: <strong>{{ ballot_counts.voided }}</strong></span>
     </div>
+    {% elif profile %}
+    <p class="lede warn">
+      Masz profil, ale bez obwodu wyborczego — głosowanie niedostępne.
+      <a href="{% url 'change_station' %}">Wybierz komisję (obwód)</a>
+    </p>
     {% else %}
-    <p class="lede warn">Brak przypisanej komisji wyborczej.
+    <p class="lede warn">Brak przypisanego obwodu wyborczego.
       <a href="{% url 'change_station' %}">Wybierz komisję</a>
     </p>
     {% endif %}

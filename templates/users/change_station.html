@@ -7,11 +7,13 @@
   <p class="eyebrow"><a href="{% url 'dashboard' %}">← Panel</a></p>
   <h1>Komisja wyborcza</h1>
   <p class="lede">
-    {% if profile %}
-    Aktualnie: <strong>{{ profile.polling_station.name }}</strong>
-    ({{ profile.polling_station.code }}) · {{ profile.polling_station.address }}
+    {% if profile and profile.territorial_unit_id %}
+    Aktualnie: <strong>{{ profile.territorial_unit }}</strong>
+    {% if display_station %}
+    · komisja: {{ display_station.name }} ({{ display_station.code }}) · {{ display_station.address }}
+    {% endif %}
     {% else %}
-    Nie masz jeszcze przypisanej komisji — wybierz ją poniżej.
+    Nie masz jeszcze przypisanego obwodu — wybierz komisję poniżej (zapisze obwód).
     {% endif %}
   </p>
 
@@ -20,7 +22,11 @@
     <span>Głosy zawieszone: <strong>{{ ballot_counts.voided }}</strong></span>
   </div>
 
-  <form method="post" id="station-change-form" class="station-form" novalidate>
+  <form method="post" id="station-change-form" class="station-form" novalidate
+        data-children-url="{{ children_url }}"
+        data-stations-url="{{ stations_url }}"
+        data-preview-url="{{ preview_url }}"
+        data-current-id="{{ current_station_id|default:'' }}">
     {% csrf_token %}
     <input type="hidden" name="station_id" id="station-id-input" value="">
 
@@ -28,24 +34,35 @@
       <span>Województwo</span>
       <select id="select-voivodeship">
         <option value="">— wybierz —</option>
+        {% for v in voivodeships %}
+        <option value="{{ v.pk }}">{{ v.name }}</option>
+        {% endfor %}
       </select>
     </label>
 
     <label class="field">
-      <span>Jednostka terytorialna</span>
-      <select id="select-unit" disabled>
+      <span>Powiat / gmina</span>
+      <select id="select-county" disabled>
         <option value="">— wybierz województwo —</option>
+      </select>
+    </label>
+
+    <label class="field" id="field-municipality">
+      <span>Gmina</span>
+      <select id="select-municipality" disabled>
+        <option value="">— wybierz powiat —</option>
       </select>
     </label>
 
     <label class="field">
       <span>Komisja wyborcza</span>
       <select id="select-station" disabled>
-        <option value="">— wybierz jednostkę —</option>
+        <option value="">— wybierz gminę —</option>
       </select>
     </label>
 
     <p class="hint" id="station-address"></p>
+    <p class="hint" id="station-load-status" hidden></p>
 
     <button type="button" class="btn btn-primary" id="btn-open-confirm" disabled>
       Zmień komisję
@@ -66,34 +83,40 @@
   </form>
 </dialog>
 
-{{ station_tree_json|json_script:"station-tree" }}
+{{ current_path_json|json_script:"current-path" }}
 {% endblock %}
 
 {% block extra_js %}
 <script>
   document.addEventListener('DOMContentLoaded', () => {
-    const tree = JSON.parse(document.getElementById('station-tree').textContent);
+    const form = document.getElementById('station-change-form');
+    const childrenUrl = form.dataset.childrenUrl;
+    const stationsUrl = form.dataset.stationsUrl;
+    const previewUrl = form.dataset.previewUrl;
+    const currentId = form.dataset.currentId ? Number(form.dataset.currentId) : null;
+
     const voivSel = document.getElementById('select-voivodeship');
-    const unitSel = document.getElementById('select-unit');
+    const countySel = document.getElementById('select-county');
+    const muniSel = document.getElementById('select-municipality');
     const stationSel = document.getElementById('select-station');
     const stationInput = document.getElementById('station-id-input');
     const addressEl = document.getElementById('station-address');
+    const statusEl = document.getElementById('station-load-status');
     const openBtn = document.getElementById('btn-open-confirm');
-    const form = document.getElementById('station-change-form');
     const modal = document.getElementById('station-confirm-modal');
     const modalWarning = document.getElementById('modal-warning');
     const modalList = document.getElementById('modal-void-list');
     const restoreNote = document.getElementById('modal-restore-note');
     const confirmBtn = document.getElementById('btn-confirm-change');
-    const currentId = {{ current_station_id|default:'null' }};
-    const previewUrl = '{% url "preview_station_change" %}';
 
-    tree.forEach((v) => {
-      const opt = document.createElement('option');
-      opt.value = v.id;
-      opt.textContent = v.name;
-      voivSel.appendChild(opt);
-    });
+    let path = {};
+    try {
+      path = JSON.parse(document.getElementById('current-path').textContent) || {};
+    } catch (e) {
+      path = {};
+    }
+
+    const stationCache = {}; // unitId → stations[]
 
     function resetSelect(sel, placeholder, disabled) {
       sel.innerHTML = '';
@@ -104,45 +127,135 @@
       sel.disabled = !!disabled;
     }
 
-    voivSel.addEventListener('change', () => {
-      const v = tree.find((x) => String(x.id) === voivSel.value);
-      resetSelect(unitSel, v ? '— wybierz —' : '— wybierz województwo —', !v);
-      resetSelect(stationSel, '— wybierz jednostkę —', true);
+    function clearStation() {
       stationInput.value = '';
       addressEl.textContent = '';
       openBtn.disabled = true;
-      if (!v) return;
-      v.units.forEach((u) => {
+    }
+
+    function setStatus(text) {
+      if (!text) {
+        statusEl.hidden = true;
+        statusEl.textContent = '';
+        return;
+      }
+      statusEl.hidden = false;
+      statusEl.textContent = text;
+    }
+
+    function fillOptions(sel, items, placeholder) {
+      resetSelect(sel, placeholder, false);
+      items.forEach((item) => {
         const opt = document.createElement('option');
-        opt.value = u.id;
-        opt.textContent = u.name;
-        unitSel.appendChild(opt);
+        opt.value = item.id;
+        opt.textContent = item.label || item.name;
+        sel.appendChild(opt);
       });
+    }
+
+    async function fetchJson(url) {
+      const res = await fetch(url, { headers: { Accept: 'application/json' } });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res.json();
+    }
+
+    async function loadStations(unitId) {
+      if (stationCache[unitId]) return stationCache[unitId];
+      setStatus('Ładowanie komisji…');
+      const data = await fetchJson(
+        `${stationsUrl}?unit_id=${encodeURIComponent(unitId)}`
+      );
+      setStatus('');
+      stationCache[unitId] = data.stations || [];
+      return stationCache[unitId];
+    }
+
+    const muniField = document.getElementById('field-municipality');
+    const midCache = {}; // parentId → children[]
+
+    async function loadChildren(parentId) {
+      if (midCache[parentId]) return midCache[parentId];
+      setStatus('Ładowanie…');
+      const data = await fetchJson(
+        `${childrenUrl}?parent_id=${encodeURIComponent(parentId)}`
+      );
+      setStatus('');
+      midCache[parentId] = data.children || [];
+      return midCache[parentId];
+    }
+
+    async function applyMunicipality(unitId) {
+      resetSelect(stationSel, '— wybierz —', true);
+      clearStation();
+      try {
+        const stations = await loadStations(unitId);
+        fillOptions(
+          stationSel,
+          stations,
+          stations.length ? '— wybierz —' : '— brak komisji —'
+        );
+        if (!stations.length) stationSel.disabled = true;
+      } catch (e) {
+        setStatus('Nie udało się wczytać komisji.');
+      }
+    }
+
+    voivSel.addEventListener('change', async () => {
+      resetSelect(countySel, '— wybierz województwo —', true);
+      resetSelect(muniSel, '— wybierz powiat —', true);
+      resetSelect(stationSel, '— wybierz gminę —', true);
+      muniField.hidden = false;
+      clearStation();
+      if (!voivSel.value) return;
+      try {
+        const children = await loadChildren(voivSel.value);
+        fillOptions(countySel, children, children.length ? '— wybierz —' : '— brak jednostek —');
+        if (!children.length) countySel.disabled = true;
+      } catch (e) {
+        setStatus('Nie udało się wczytać jednostek.');
+      }
     });
 
-    unitSel.addEventListener('change', () => {
-      const v = tree.find((x) => String(x.id) === voivSel.value);
-      const u = v && v.units.find((x) => String(x.id) === unitSel.value);
-      resetSelect(stationSel, u ? '— wybierz —' : '— wybierz jednostkę —', !u);
-      stationInput.value = '';
-      addressEl.textContent = '';
-      openBtn.disabled = true;
-      if (!u) return;
-      u.stations.forEach((s) => {
-        const opt = document.createElement('option');
-        opt.value = s.id;
-        opt.textContent = s.label;
-        if (currentId && Number(s.id) === Number(currentId)) {
-          opt.textContent += ' (aktualna)';
-        }
-        stationSel.appendChild(opt);
-      });
+    countySel.addEventListener('change', async () => {
+      resetSelect(muniSel, '— wybierz powiat —', true);
+      resetSelect(stationSel, '— wybierz gminę —', true);
+      clearStation();
+      if (!countySel.value) {
+        muniField.hidden = false;
+        return;
+      }
+      const children = midCache[voivSel.value] || [];
+      const selected = children.find((c) => String(c.id) === countySel.value);
+      if (selected && selected.kind === 'municipality') {
+        // Gmina bezpośrednio pod województwem — pomiń poziom powiatu.
+        muniField.hidden = true;
+        resetSelect(muniSel, '—', true);
+        await applyMunicipality(selected.id);
+        return;
+      }
+      muniField.hidden = false;
+      try {
+        const munis = await loadChildren(countySel.value);
+        fillOptions(muniSel, munis, munis.length ? '— wybierz —' : '— brak gmin —');
+        if (!munis.length) muniSel.disabled = true;
+      } catch (e) {
+        setStatus('Nie udało się wczytać gmin.');
+      }
+    });
+
+    muniSel.addEventListener('change', async () => {
+      if (!muniSel.value) {
+        resetSelect(stationSel, '— wybierz gminę —', true);
+        clearStation();
+        return;
+      }
+      await applyMunicipality(muniSel.value);
     });
 
     stationSel.addEventListener('change', () => {
-      const v = tree.find((x) => String(x.id) === voivSel.value);
-      const u = v && v.units.find((x) => String(x.id) === unitSel.value);
-      const s = u && u.stations.find((x) => String(x.id) === stationSel.value);
+      const unitId = muniField.hidden ? countySel.value : muniSel.value;
+      const stations = stationCache[unitId] || [];
+      const s = stations.find((x) => String(x.id) === stationSel.value);
       stationInput.value = s ? s.id : '';
       addressEl.textContent = s ? s.address : '';
       openBtn.disabled = !s || (currentId && Number(s.id) === Number(currentId));
@@ -184,6 +297,41 @@
       modal.close();
       form.submit();
     });
+
+    async function preselect() {
+      if (!path || !path.voivodeship_id) return;
+      voivSel.value = String(path.voivodeship_id);
+      try {
+        const counties = await loadChildren(path.voivodeship_id);
+        fillOptions(countySel, counties, '— wybierz —');
+        if (path.county_id) {
+          countySel.value = String(path.county_id);
+          muniField.hidden = false;
+          const munis = await loadChildren(path.county_id);
+          fillOptions(muniSel, munis, '— wybierz —');
+          if (path.municipality_id) {
+            muniSel.value = String(path.municipality_id);
+            await applyMunicipality(path.municipality_id);
+            if (path.station_id) {
+              stationSel.value = String(path.station_id);
+              stationSel.dispatchEvent(new Event('change'));
+            }
+          }
+        } else if (path.municipality_id) {
+          // Gmina bez powiatu
+          countySel.value = String(path.municipality_id);
+          muniField.hidden = true;
+          await applyMunicipality(path.municipality_id);
+          if (path.station_id) {
+            stationSel.value = String(path.station_id);
+            stationSel.dispatchEvent(new Event('change'));
+          }
+        }
+      } catch (e) {
+        /* ignore */
+      }
+    }
+    preselect();
   });
 </script>
 {% endblock %}

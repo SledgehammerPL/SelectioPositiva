@@ -12,7 +12,7 @@
     listEl.querySelectorAll(".candidate-item").forEach((item, idx) => {
       const num = item.querySelector(".rank-num");
       if (num) num.textContent = String(idx + 1);
-      const input = item.querySelector('input[name="ranked_candidate_ids"]');
+      const input = item.querySelector('input[name="ranked_user_ids"]');
       if (input) input.value = item.dataset.id;
     });
   }
@@ -97,7 +97,7 @@
           '<span class="drag-handle" title="Przeciągnij" aria-hidden="true">⋮⋮</span>' +
           '<div class="candidate-body"><strong></strong></div>' +
           '<button type="button" class="btn btn-ghost btn-sm js-remove-rank" title="Usuń z rankingu">Usuń</button>' +
-          '<input type="hidden" name="ranked_candidate_ids" value="">';
+          '<input type="hidden" name="ranked_user_ids" value="">';
         li.querySelector("strong").textContent = c.name;
         const body = li.querySelector(".candidate-body");
         if (c.birth_date) {
@@ -112,7 +112,7 @@
           span.textContent = c.committee;
           body.appendChild(span);
         }
-        li.querySelector('input[name="ranked_candidate_ids"]').value = String(
+        li.querySelector('input[name="ranked_user_ids"]').value = String(
           c.id
         );
         return li;

@@ -41,7 +41,6 @@ def _make_user(username: str, station: PollingStation, birth_year: int = 1985) -
     u = User.objects.create_user(username, password="x", first_name=username.capitalize(), last_name="Testowy")
     VoterProfile.objects.create(
         user=u,
-        polling_station=station,
         territorial_unit=station.precinct,
         birth_date=date(birth_year, 6, 1),
     )

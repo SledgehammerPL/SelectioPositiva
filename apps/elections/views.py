@@ -54,11 +54,18 @@ class ElectionLogoutView(LogoutView):
 
 def _user_payload(user) -> dict:
     full = f"{user.first_name} {user.last_name}".strip()
+    birth = None
+    try:
+        profile = user.voter_profile
+        if profile and profile.birth_date:
+            birth = str(profile.birth_date)
+    except Exception:
+        pass
     return {
         "id": user.pk,
         "name": full or user.username,
         "username": user.username,
-        "birth_date": str(user.birth_date) if getattr(user, "birth_date", None) else None,
+        "birth_date": birth,
     }
 
 
@@ -66,35 +73,46 @@ def _search_users_for_district(
     district: ElectoralDistrict,
     *,
     q: str = "",
+    birth_date: str = "",
     exclude_ids: list[int] | None = None,
     limit: int = 40,
     today: date | None = None,
 ) -> list:
     """
     Autocomplete: wyszukuje użytkowników uprawnionych do kandydowania w okręgu.
-    Wymaga min. 3 znaków. Wyszukuje od początku imienia/nazwiska/username (istartswith).
+    Wymaga min. 3 znaków imienia/nazwiska LUB daty urodzenia.
     """
     query = q.strip()
-    if len(query) < MIN_SEARCH_CHARS:
+    birth = birth_date.strip()
+    if len(query) < MIN_SEARCH_CHARS and not birth:
         return []
 
     ref = today or date.today()
 
-    # Wyborcy z komisjami → ich profile
+    # Wyborcy z obwodem (mogą głosować/kandydować)
     eligible_user_ids = list(
-        VoterProfile.objects.filter(polling_station__isnull=False)
-        .values_list("user_id", flat=True)
+        VoterProfile.objects.filter(
+            territorial_unit__kind=TerritorialUnit.Kind.PRECINCT,
+        ).values_list("user_id", flat=True)
     )
 
     qs = User.objects.filter(
         pk__in=eligible_user_ids,
         is_active=True,
-    )
-    qs = qs.filter(
-        Q(first_name__istartswith=query)
-        | Q(last_name__istartswith=query)
-        | Q(username__istartswith=query)
-    )
+    ).select_related("voter_profile", "voter_profile__territorial_unit")
+
+    if birth:
+        try:
+            qs = qs.filter(voter_profile__birth_date=date.fromisoformat(birth))
+        except ValueError:
+            return []
+
+    if len(query) >= MIN_SEARCH_CHARS:
+        qs = qs.filter(
+            Q(first_name__istartswith=query)
+            | Q(last_name__istartswith=query)
+            | Q(username__istartswith=query)
+        )
 
     if exclude_ids:
         qs = qs.exclude(pk__in=exclude_ids)
@@ -112,11 +130,8 @@ def _search_users_for_district(
             profile = user.voter_profile
         except Exception:
             continue
-        if not profile.polling_station_id:
-            continue
-        try:
-            precinct = profile.polling_station.precinct
-        except Exception:
+        precinct = profile.territorial_unit
+        if not precinct or precinct.kind != TerritorialUnit.Kind.PRECINCT:
             continue
         if district_unit_ids and not unit_is_descendant_of_any(precinct, district_unit_ids):
             continue
@@ -144,19 +159,41 @@ def dashboard(request: HttpRequest) -> HttpResponse:
     station_summary = request.session.pop("station_change_summary", None)
 
     map_payload: dict = {"station": None, "units": []}
-    if profile is not None and profile.polling_station_id:
-        station = profile.polling_station
-        # Preferuj obwód komisji; fallback: territorial_unit profilu.
-        unit = station.precinct or profile.territorial_unit
-        ancestors = unit.get_ancestors(include_self=True) if unit is not None else []
+    display_station = None
+    if profile is not None and profile.territorial_unit_id:
+        unit = profile.territorial_unit
+        ancestors = unit.get_ancestors(include_self=True)
+        # Komisja tylko do wyświetlenia lokalizacji (nie jest w profilu).
+        if unit.kind == TerritorialUnit.Kind.PRECINCT:
+            from geo.models import PollingStation
+
+            display_station = (
+                PollingStation.objects.filter(precinct=unit)
+                .order_by("number", "pk")
+                .first()
+            )
         map_payload = {
-            "station": {
-                "name": station.name,
-                "code": station.code,
-                "address": station.address,
-                "lat": float(station.latitude) if station.latitude is not None else None,
-                "lng": float(station.longitude) if station.longitude is not None else None,
-            },
+            "station": (
+                {
+                    "name": display_station.name,
+                    "code": display_station.code,
+                    "address": display_station.address,
+                    "lat": float(display_station.latitude)
+                    if display_station.latitude is not None
+                    else None,
+                    "lng": float(display_station.longitude)
+                    if display_station.longitude is not None
+                    else None,
+                }
+                if display_station
+                else {
+                    "name": str(unit),
+                    "code": unit.slug,
+                    "address": "",
+                    "lat": float(unit.center_lat) if unit.center_lat is not None else None,
+                    "lng": float(unit.center_lng) if unit.center_lng is not None else None,
+                }
+            ),
             "units": [
                 {
                     "id": u.pk,
@@ -164,8 +201,12 @@ def dashboard(request: HttpRequest) -> HttpResponse:
                     "kind": u.kind,
                     "kind_label": u.get_kind_display(),
                     "boundary": getattr(u, "boundary", None),
-                    "center_lat": float(u.center_lat) if getattr(u, "center_lat", None) is not None else None,
-                    "center_lng": float(u.center_lng) if getattr(u, "center_lng", None) is not None else None,
+                    "center_lat": float(u.center_lat)
+                    if getattr(u, "center_lat", None) is not None
+                    else None,
+                    "center_lng": float(u.center_lng)
+                    if getattr(u, "center_lng", None) is not None
+                    else None,
                 }
                 for u in ancestors
             ],
@@ -176,6 +217,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         "elections/dashboard.html",
         {
             "profile": profile,
+            "display_station": display_station,
             "statuses": statuses,
             "map_payload_json": map_payload,
             "ballot_counts": ballot_counts,
@@ -250,7 +292,7 @@ def vote_district(request: HttpRequest, slug: str) -> HttpResponse:
     if ballot and not ballot.is_voided and ballot.ranked_user_ids:
         ranked_ids = list(ballot.ranked_user_ids)
     ranked_users = list(
-        User.objects.filter(pk__in=ranked_ids).only("pk", "first_name", "last_name", "username", "birth_date")
+        User.objects.filter(pk__in=ranked_ids).select_related("voter_profile")
     )
     # Zachowaj kolejność
     ranked_by_id = {u.pk: u for u in ranked_users}
@@ -282,6 +324,7 @@ def vote_candidate_search(request: HttpRequest, slug: str) -> JsonResponse:
         return JsonResponse({"error": "forbidden"}, status=403)
 
     q = request.GET.get("q", "").strip()
+    birth = request.GET.get("birth_date", "").strip()
     exclude_raw = request.GET.get("exclude", "")
     exclude_ids: list[int] = []
     for part in exclude_raw.split(","):
@@ -289,10 +332,12 @@ def vote_candidate_search(request: HttpRequest, slug: str) -> JsonResponse:
         if part.isdigit():
             exclude_ids.append(int(part))
 
-    if len(q) < MIN_SEARCH_CHARS:
+    if len(q) < MIN_SEARCH_CHARS and not birth:
         return JsonResponse({"active": False, "results": []})
 
-    found = _search_users_for_district(district, q=q, exclude_ids=exclude_ids, limit=40)
+    found = _search_users_for_district(
+        district, q=q, birth_date=birth, exclude_ids=exclude_ids, limit=40
+    )
     return JsonResponse(
         {
             "active": True,

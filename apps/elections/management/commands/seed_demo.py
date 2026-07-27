@@ -1,5 +1,8 @@
 """
-Zasiewa dane demo: jednostki terytorialne → obwody → komisje → okręgi → użytkownicy.
+Seed kont demo / urzędów demo.
+
+Gdy w bazie są już dane PKW (komisje z TERYT), NIE tworzy jednostek
+geograficznych ani obwodów demonstracyjnych — używa prawdziwych.
 
 Użycie: python manage.py seed_demo
 """
@@ -17,98 +20,81 @@ from geo.models import PollingStation, TerritorialUnit
 
 User = get_user_model()
 
-
-def _box(west: float, south: float, east: float, north: float) -> dict:
-    return {
-        "type": "Polygon",
-        "coordinates": [
-            [
-                [west, south],
-                [east, south],
-                [east, north],
-                [west, north],
-                [west, south],
-            ]
-        ],
-    }
-
-
-def _unit(slug, name, kind, parent=None, boundary=None, lat=None, lng=None):
-    defaults = {"name": name, "kind": kind, "parent": parent}
-    if boundary:
-        defaults["boundary"] = boundary
-    if lat:
-        defaults["center_lat"] = lat
-    if lng:
-        defaults["center_lng"] = lng
-    obj, _ = TerritorialUnit.objects.update_or_create(slug=slug, defaults=defaults)
-    return obj
+# Slugi/kody tworzone kiedyś przez seed — do usunięcia przy obecności PKW.
+DEMO_UNIT_SLUGS = (
+    "gmina-katowice",
+    "gmina-warszawa",
+    "obwod-katowice-1",
+    "obwod-warszawa-1",
+    "slaskie",  # tylko jeśli bez TERYT — PKW używa woj-XX
+    "mazowieckie",
+)
+DEMO_STATION_CODES = ("KTW-001", "WAW-001")
 
 
 class Command(BaseCommand):
-    help = "Tworzy dane demo (jednostki, okręgi, komisje, użytkownicy-kandydaci)."
+    help = (
+        "Tworzy użytkowników/partie/urzędy demo. "
+        "Nie dokłada fałszywych obwodów, gdy baza ma dane PKW."
+    )
 
     @transaction.atomic
     def handle(self, *args, **options):
-        # ── Jednostki administracyjne ────────────────────────────────────────
-        poland = _unit(
-            "polska", "Polska", TerritorialUnit.Kind.COUNTRY,
-            boundary=_box(14.1, 49.0, 24.2, 54.9), lat="52.100000", lng="19.400000",
-        )
-        slask = _unit(
-            "slaskie", "Województwo Śląskie", TerritorialUnit.Kind.VOIVODESHIP, poland,
-            boundary=_box(18.0, 49.35, 19.85, 50.95), lat="50.250000", lng="19.000000",
-        )
-        gmina = _unit(
-            "gmina-katowice", "Gmina Katowice", TerritorialUnit.Kind.MUNICIPALITY, slask,
-            boundary=_box(18.92, 50.20, 19.15, 50.33), lat="50.264900", lng="19.023800",
-        )
-        mazowsze = _unit(
-            "mazowieckie", "Województwo Mazowieckie", TerritorialUnit.Kind.VOIVODESHIP, poland,
-            boundary=_box(19.5, 51.5, 22.0, 53.5), lat="52.230000", lng="21.010000",
-        )
-        gmina_waw = _unit(
-            "gmina-warszawa", "Gmina Warszawa", TerritorialUnit.Kind.MUNICIPALITY, mazowsze,
-            boundary=_box(20.85, 52.15, 21.2, 52.35), lat="52.229700", lng="21.012200",
-        )
+        has_pkw = PollingStation.objects.filter(
+            code__regex=r"^[0-9]{6}-[0-9]+$",
+            precinct__isnull=False,
+        ).exists()
 
-        # ── Obwody wyborcze (precinct) — podpoziom gminy ─────────────────────
-        precinct_ktw = _unit(
-            "obwod-katowice-1", "Obwód 1 Katowice (Śródmieście)",
-            TerritorialUnit.Kind.PRECINCT, gmina,
-        )
-        precinct_waw = _unit(
-            "obwod-warszawa-1", "Obwód 1 Warszawa (Śródmieście)",
-            TerritorialUnit.Kind.PRECINCT, gmina_waw,
-        )
+        if has_pkw:
+            removed = self._purge_demo_geo()
+            if removed:
+                self.stdout.write(
+                    self.style.WARNING(
+                        f"Usunięto {removed} demonstracyjnych jednostek/komisji "
+                        "(baza ma dane PKW)."
+                    )
+                )
+            poland = TerritorialUnit.objects.filter(
+                kind=TerritorialUnit.Kind.COUNTRY
+            ).first() or TerritorialUnit.objects.filter(slug="polska").first()
+            station = (
+                PollingStation.objects.filter(
+                    code="246901-1", precinct__isnull=False
+                ).first()
+                or PollingStation.objects.filter(
+                    code__startswith="246901-", precinct__isnull=False
+                )
+                .order_by("number")
+                .first()
+            )
+            station_waw = (
+                PollingStation.objects.filter(
+                    code__startswith="146501-", precinct__isnull=False
+                )
+                .order_by("number")
+                .first()
+                or station
+            )
+            if station is None:
+                self.stdout.write(
+                    self.style.ERROR(
+                        "Brak komisji PKW z obwodem — uruchom import_pkw_poland "
+                        "/ backfill_precincts."
+                    )
+                )
+                return
+        else:
+            self.stdout.write(
+                self.style.WARNING(
+                    "Brak danych PKW — seed nie tworzy już geografii demo. "
+                    "Najpierw: python manage.py import_pkw_poland && "
+                    "python manage.py backfill_precincts && "
+                    "python manage.py backfill_district_units"
+                )
+            )
+            return
 
-        # ── Komisje wyborcze (przypisane do obwodów) ─────────────────────────
-        station, _ = PollingStation.objects.update_or_create(
-            code="KTW-001",
-            defaults={
-                "name": "Obwodowa Komisja Wyborcza nr 1",
-                "number": 1,
-                "precinct": precinct_ktw,
-                "address": "ul. Młyńska 4, 40-098 Katowice",
-                "streets_served": "ul. Młyńska, Stawowa (okolice rynku).",
-                "latitude": "50.259100",
-                "longitude": "19.021600",
-            },
-        )
-        station_waw, _ = PollingStation.objects.update_or_create(
-            code="WAW-001",
-            defaults={
-                "name": "Obwodowa Komisja Wyborcza nr 1 — Warszawa",
-                "number": 1,
-                "precinct": precinct_waw,
-                "address": "ul. Senatorska 2, 00-075 Warszawa",
-                "streets_served": "ul. Senatorska, Miodowa (fragment).",
-                "latitude": "52.244500",
-                "longitude": "21.013000",
-            },
-        )
-
-        # ── Urzędy ───────────────────────────────────────────────────────────
+        # ── Urzędy (tylko brakujące / aktualizacja metadanych) ───────────────
         offices_data = [
             ("prezydent-rp", "Prezydent RP", "Wybory ogólnokrajowe.", 1),
             ("eurodeputowany", "Poseł do Europarlamentu", "Mandaty europejskie.", 2),
@@ -133,13 +119,11 @@ class Command(BaseCommand):
             )
             offices[slug] = office
 
-        # ── Partie ───────────────────────────────────────────────────────────
-        parties = {}
         for slug, pname, abbr, order in [
             ("partia-a", "Partia Demo A", "PDA", 1),
             ("partia-b", "Partia Demo B", "PDB", 2),
         ]:
-            party, _ = Party.objects.update_or_create(
+            Party.objects.update_or_create(
                 slug=slug,
                 defaults={
                     "name": pname,
@@ -148,50 +132,32 @@ class Command(BaseCommand):
                     "display_order": order,
                 },
             )
-            parties[slug] = party
 
-        # ── Okręgi wyborcze → territorial_units (M2M) ───────────────────────
-        # Każdy okręg jest powiązany z węzłem hierarchii, którego obwody są uprawnione.
-        districts_spec = [
-            # (slug, office_slug, name, [units], seats, min_age, order)
-            ("prezydent-rp-kraj", "prezydent-rp", "Okręg ogólnopolski", [poland], 1, 35, 1),
-            ("euro-slask", "eurodeputowany", "Okręg — Województwo Śląskie", [slask], 2, 18, 1),
-            ("sejm-31-katowice", "posel-sejm", "Okręg nr 31 — Katowice", [poland], 12, 18, 1),
-            ("senat-katowice", "senator", "Okręg senacki Katowice", [poland], 1, 30, 1),
-            ("prezydent-katowice", "prezydent-miasta", "Gmina Katowice", [gmina], 1, 18, 1),
-            ("rada-katowice", "radny", "Okręg miejski Katowice", [gmina], 3, 18, 1),
-            ("prezydent-warszawa", "prezydent-miasta", "Gmina Warszawa", [gmina_waw], 1, 18, 2),
-            ("sejm-19-warszawa", "posel-sejm", "Okręg nr 19 — Warszawa", [poland], 20, 18, 2),
-        ]
-
-        created_districts: dict[str, ElectoralDistrict] = {}
-        for dslug, oslug, dname, units, seats, min_age, order in districts_spec:
-            district, _ = ElectoralDistrict.objects.update_or_create(
-                slug=dslug,
-                defaults={
-                    "office": offices[oslug],
-                    "name": dname,
-                    "seats_count": seats,
-                    "min_age": min_age,
-                    "display_order": order,
-                },
+        # Demo-okręg prezydencki — tylko jeśli brak; nie nadpisuj M2M PKW.
+        if poland and not ElectoralDistrict.objects.filter(slug="prezydent-rp-kraj").exists():
+            d = ElectoralDistrict.objects.create(
+                slug="prezydent-rp-kraj",
+                office=offices["prezydent-rp"],
+                name="Okręg ogólnopolski",
+                seats_count=1,
+                min_age=35,
+                display_order=1,
             )
-            district.territorial_units.set(units)
-            created_districts[dslug] = district
+            d.territorial_units.set([poland])
 
-        # ── Użytkownicy-kandydaci demo ────────────────────────────────────────
+        # ── Użytkownicy demo na prawdziwych obwodach ─────────────────────────
         candidates_data = [
-            ("anna",     "Kowalska",     date(1975, 3, 15),  station),
-            ("jan",      "Nowak",        date(1968, 7, 22),  station),
-            ("piotr",    "Wisniewski",   date(1982, 1, 5),   station),
-            ("maria",    "Zielinska",    date(1990, 11, 30), station),
-            ("ewa",      "Maj",          date(1978, 6, 10),  station),
-            ("tomasz",   "Krol",         date(1985, 9, 18),  station),
-            ("barbara",  "Lewandowska",  date(1972, 4, 25),  station),
-            ("hanna",    "Nowicka",      date(1980, 2, 14),  station_waw),
-            ("stefan",   "Borkowski",    date(1965, 12, 3),  station_waw),
-            ("julia",    "Malinowska",   date(1993, 8, 27),  station_waw),
-            ("adam",     "Warszawski",   date(1977, 5, 9),   station_waw),
+            ("anna", "Kowalska", date(1975, 3, 15), station),
+            ("jan", "Nowak", date(1968, 7, 22), station),
+            ("piotr", "Wisniewski", date(1982, 1, 5), station),
+            ("maria", "Zielinska", date(1990, 11, 30), station),
+            ("ewa", "Maj", date(1978, 6, 10), station),
+            ("tomasz", "Krol", date(1985, 9, 18), station),
+            ("barbara", "Lewandowska", date(1972, 4, 25), station),
+            ("hanna", "Nowicka", date(1980, 2, 14), station_waw),
+            ("stefan", "Borkowski", date(1965, 12, 3), station_waw),
+            ("julia", "Malinowska", date(1993, 8, 27), station_waw),
+            ("adam", "Warszawski", date(1977, 5, 9), station_waw),
         ]
         for username, last_name, birth_date, st in candidates_data:
             u, created = User.objects.get_or_create(
@@ -208,13 +174,11 @@ class Command(BaseCommand):
             VoterProfile.objects.update_or_create(
                 user=u,
                 defaults={
-                    "polling_station": st,
                     "territorial_unit": st.precinct,
                     "birth_date": birth_date,
                 },
             )
 
-        # ── Demo-wyborca główny ───────────────────────────────────────────────
         user, created = User.objects.get_or_create(
             username="demo",
             defaults={
@@ -227,28 +191,65 @@ class Command(BaseCommand):
             user.set_password("demo1234")
             user.save()
 
-        # Preferuj komisję PKW Katowice tylko jeśli ma już przypisany obwód.
-        pkw = (
-            PollingStation.objects
-            .filter(code="246901-1", precinct__isnull=False)
-            .first()
-        )
-        effective_station = pkw or station
-        effective_precinct = effective_station.precinct or precinct_ktw
-
         VoterProfile.objects.update_or_create(
             user=user,
             defaults={
-                "polling_station": effective_station,
-                "territorial_unit": effective_precinct,
+                "territorial_unit": station.precinct,
                 "birth_date": date(1990, 5, 12),
             },
         )
 
-        self.stdout.write(self.style.SUCCESS("Seed demo OK."))
+        self.stdout.write(self.style.SUCCESS("Seed demo OK (bez geografii demo)."))
         self.stdout.write("  Login: demo / demo1234")
-        self.stdout.write(f"  Komisja: {effective_station}")
-        self.stdout.write(f"  Alternatywna komisja (WAW): {station_waw}")
-        self.stdout.write(
-            f"  Kandydaci demo: {', '.join(u for u, *_ in candidates_data)}"
+        self.stdout.write(f"  Obwód demo: {station.precinct}")
+        self.stdout.write(f"  Komisja (lokalizacja): {station}")
+
+    def _purge_demo_geo(self) -> int:
+        """Usuwa stare komisje/obwody/gminy demo, które kolidują z PKW."""
+        removed = 0
+
+        # Najpierw odłącz profile od demo-obwodów
+        demo_precincts = TerritorialUnit.objects.filter(
+            slug__in=("obwod-katowice-1", "obwod-warszawa-1")
         )
+        VoterProfile.objects.filter(territorial_unit__in=demo_precincts).update(
+            territorial_unit=None
+        )
+
+        deleted_st, _ = PollingStation.objects.filter(
+            code__in=DEMO_STATION_CODES
+        ).delete()
+        removed += deleted_st
+
+        # Usuń demo-obwody i demo-gminy bez TERYT (nie ruszaj woj-* / gmina-XXXXXX z PKW)
+        for slug in (
+            "obwod-katowice-1",
+            "obwod-warszawa-1",
+            "gmina-katowice",
+            "gmina-warszawa",
+        ):
+            qs = TerritorialUnit.objects.filter(slug=slug)
+            # Nie kasuj jeśli to jednostka PKW z TERYT (nie powinno się zdarzyć)
+            for u in qs:
+                if u.teryt:
+                    continue
+                # Odłącz okręgi demo od tej jednostki
+                for d in ElectoralDistrict.objects.filter(territorial_units=u):
+                    d.territorial_units.remove(u)
+                u.delete()
+                removed += 1
+
+        # Stare slugi województw bez TERYT (PKW ma woj-24 itd.)
+        for slug in ("slaskie", "mazowieckie"):
+            u = TerritorialUnit.objects.filter(slug=slug, teryt="").first()
+            if u is None:
+                continue
+            # Tylko jeśli nie ma dzieci PKW pod spodem
+            if u.children.exists():
+                continue
+            for d in ElectoralDistrict.objects.filter(territorial_units=u):
+                d.territorial_units.remove(u)
+            u.delete()
+            removed += 1
+
+        return removed

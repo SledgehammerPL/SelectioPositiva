@@ -1,5 +1,6 @@
 """
-Zmiana komisji wyborczej użytkownika z zamrażaniem / przywracaniem głosów.
+Zmiana obwodu wyborczego użytkownika (UI: wybór komisji → zapis precinct)
+z zamrażaniem / przywracaniem głosów.
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ from django.utils import timezone
 from elections.models import Ballot, ElectoralDistrict, VoterProfile
 from elections.services.eligibility import get_eligible_districts, get_voter_profile
 from elections.services.results import invalidate_district_results
-from geo.models import PollingStation
+from geo.models import PollingStation, TerritorialUnit
 
 
 VOID_REASON_STATION_CHANGE = Ballot.VoidReason.CHANGE_OF_POLLING_STATION
@@ -21,13 +22,13 @@ VOID_REASON_STATION_CHANGE = Ballot.VoidReason.CHANGE_OF_POLLING_STATION
 
 @dataclass
 class StationChangePreview:
-    current_station: PollingStation | None
+    current_precinct: TerritorialUnit | None
     new_station: PollingStation
+    new_precinct: TerritorialUnit
     districts_to_void: list[ElectoralDistrict] = field(default_factory=list)
     districts_to_restore: list[ElectoralDistrict] = field(default_factory=list)
     districts_unchanged_active: list[ElectoralDistrict] = field(default_factory=list)
 
-    # Aliasy pod UI (nazwy „urzędy” w komunikatach = okręgi głosowania)
     @property
     def offices_to_void(self) -> list[ElectoralDistrict]:
         return self.districts_to_void
@@ -36,15 +37,37 @@ class StationChangePreview:
     def offices_to_restore(self) -> list[ElectoralDistrict]:
         return self.districts_to_restore
 
+    @property
+    def current_station(self) -> PollingStation | None:
+        """Komisja reprezentująca aktualny obwód (do UI)."""
+        if self.current_precinct is None:
+            return None
+        return (
+            PollingStation.objects.filter(precinct=self.current_precinct)
+            .order_by("number", "pk")
+            .first()
+        )
+
 
 @dataclass
 class StationChangeResult:
-    previous_station: PollingStation
+    previous_precinct: TerritorialUnit | None
+    new_precinct: TerritorialUnit
     new_station: PollingStation
     voided_districts: list[ElectoralDistrict]
     restored_districts: list[ElectoralDistrict]
     active_ballots: int
     voided_ballots: int
+
+    @property
+    def previous_station(self) -> PollingStation | None:
+        if self.previous_precinct is None:
+            return None
+        return (
+            PollingStation.objects.filter(precinct=self.previous_precinct)
+            .order_by("number", "pk")
+            .first()
+        )
 
     @property
     def voided_offices(self) -> list[ElectoralDistrict]:
@@ -59,18 +82,19 @@ def preview_station_change(
     user: AbstractBaseUser,
     new_station: PollingStation,
 ) -> StationChangePreview:
+    if new_station.precinct_id is None:
+        raise ValueError("Komisja nie ma przypisanego obwodu.")
     profile = get_voter_profile(user)
-    current = profile.polling_station if profile else None
+    current = profile.territorial_unit if profile else None
+    new_precinct = new_station.precinct
 
     new_eligible_ids = set(
-        get_eligible_districts(
-            polling_station=new_station, only_open=False
-        ).values_list("pk", flat=True)
+        get_eligible_districts(precinct=new_precinct, only_open=False).values_list(
+            "pk", flat=True
+        )
     )
     ballots = list(
-        Ballot.objects.filter(user=user).select_related(
-            "district", "district__office"
-        )
+        Ballot.objects.filter(user=user).select_related("district", "district__office")
     )
 
     to_void: list[ElectoralDistrict] = []
@@ -89,8 +113,9 @@ def preview_station_change(
             to_void.append(district)
 
     return StationChangePreview(
-        current_station=current,
+        current_precinct=current,
         new_station=new_station,
+        new_precinct=new_precinct,
         districts_to_void=to_void,
         districts_to_restore=to_restore,
         districts_unchanged_active=unchanged,
@@ -102,35 +127,39 @@ def change_user_polling_station(
     user: AbstractBaseUser,
     new_station: PollingStation,
 ) -> StationChangeResult:
+    """UI wybiera komisję; w modelu zapisujemy tylko obwód (precinct)."""
+    if new_station.precinct_id is None:
+        raise ValueError("Komisja nie ma przypisanego obwodu.")
+    new_precinct = new_station.precinct
+
     profile = get_voter_profile(user)
     if profile is None:
         profile = VoterProfile.objects.create(
             user=user,
-            polling_station=new_station,
-            territorial_unit=new_station.precinct,
+            territorial_unit=new_precinct,
         )
-        previous = new_station
+        previous = None
     else:
-        previous = profile.polling_station
-        if previous.pk == new_station.pk:
+        previous = profile.territorial_unit
+        if previous and previous.pk == new_precinct.pk:
             active = Ballot.objects.filter(user=user, is_voided=False).count()
             voided = Ballot.objects.filter(user=user, is_voided=True).count()
             return StationChangeResult(
-                previous_station=previous,
+                previous_precinct=previous,
+                new_precinct=new_precinct,
                 new_station=new_station,
                 voided_districts=[],
                 restored_districts=[],
                 active_ballots=active,
                 voided_ballots=voided,
             )
-        profile.polling_station = new_station
-        profile.territorial_unit = new_station.precinct
-        profile.save(update_fields=["polling_station", "territorial_unit"])
+        profile.territorial_unit = new_precinct
+        profile.save(update_fields=["territorial_unit"])
 
     new_eligible_ids = set(
-        get_eligible_districts(
-            polling_station=new_station, only_open=False
-        ).values_list("pk", flat=True)
+        get_eligible_districts(precinct=new_precinct, only_open=False).values_list(
+            "pk", flat=True
+        )
     )
 
     ballots = list(Ballot.objects.filter(user=user).select_related("district"))
@@ -170,7 +199,8 @@ def change_user_polling_station(
     voided = Ballot.objects.filter(user=user, is_voided=True).count()
 
     return StationChangeResult(
-        previous_station=previous,
+        previous_precinct=previous,
+        new_precinct=new_precinct,
         new_station=new_station,
         voided_districts=voided_districts,
         restored_districts=restored_districts,

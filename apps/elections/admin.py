@@ -18,7 +18,7 @@ class VoterProfileInline(admin.StackedInline):
     model = VoterProfile
     can_delete = False
     fk_name = "user"
-    raw_id_fields = ("polling_station", "territorial_unit")
+    raw_id_fields = ("territorial_unit",)
 
 
 class UserWithProfileAdmin(BaseUserAdmin):
@@ -65,8 +65,9 @@ class BallotAdmin(admin.ModelAdmin):
 
 @admin.register(VoterProfile)
 class VoterProfileAdmin(admin.ModelAdmin):
-    list_display = ("user", "polling_station", "territorial_unit")
-    raw_id_fields = ("user", "polling_station", "territorial_unit")
+    list_display = ("user", "territorial_unit", "birth_date")
+    list_filter = ("territorial_unit__kind",)
+    raw_id_fields = ("user", "territorial_unit")
 
 
 @admin.register(ElectionResultCache)

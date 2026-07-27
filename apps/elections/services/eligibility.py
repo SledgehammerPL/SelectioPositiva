@@ -7,7 +7,7 @@ from django.contrib.auth import get_user_model
 from django.db.models import QuerySet
 
 from elections.models import Ballot, ElectoralDistrict, VoterProfile, unit_is_descendant_of_any
-from geo.models import PollingStation, TerritorialUnit
+from geo.models import TerritorialUnit
 
 User = get_user_model()
 
@@ -19,7 +19,6 @@ class DistrictVoteStatus:
     ballot: Ballot | None
 
 
-# Alias historyczny
 OfficeVoteStatus = DistrictVoteStatus
 
 
@@ -30,16 +29,6 @@ def get_voter_profile(user) -> VoterProfile | None:
         return user.voter_profile  # type: ignore[attr-defined]
     except VoterProfile.DoesNotExist:
         return None
-
-
-def _effective_unit(profile: VoterProfile) -> TerritorialUnit | None:
-    """Węzeł hierarchii wyborcy: obwód komisji (preferowany) lub territorial_unit."""
-    if profile.polling_station_id:
-        try:
-            return profile.polling_station.precinct
-        except Exception:
-            pass
-    return profile.territorial_unit
 
 
 def user_age_on(user, reference: date) -> int | None:
@@ -54,27 +43,26 @@ def user_age_on(user, reference: date) -> int | None:
     return years
 
 
-def user_eligible_for_district(user, district: ElectoralDistrict, *, today: date | None = None) -> bool:
+def user_eligible_for_district(
+    user, district: ElectoralDistrict, *, today: date | None = None
+) -> bool:
     """
     Czy użytkownik jest uprawniony do głosowania/kandydowania w okręgu.
 
     Warunki:
-    1. Musi mieć przypisaną komisję wyborczą (polling_station).
-    2. Jego obwód musi być potomkiem (lub równy) jednej z jednostek okręgu
-       (`district.territorial_units`) — sprawdzane po drzewie `parent`.
-    3. Musi spełniać limit wieku `district.min_age` (jeśli znana data urodzenia).
+    1. Musi mieć territorial_unit = obwód (kind=precinct).
+    2. Jego obwód musi być potomkiem (lub równy) jednej z jednostek okręgu.
+    3. Musi spełniać limit wieku district.min_age (jeśli znana data urodzenia).
     """
     profile = get_voter_profile(user)
     if profile is None or not profile.can_vote():
         return False
 
-    effective = _effective_unit(profile)
+    effective = profile.effective_unit()
     if effective is None:
         return False
 
-    district_unit_ids = set(
-        district.territorial_units.values_list("pk", flat=True)
-    )
+    district_unit_ids = set(district.territorial_units.values_list("pk", flat=True))
     if not district_unit_ids:
         return False
 
@@ -94,29 +82,28 @@ def user_eligible_for_district(user, district: ElectoralDistrict, *, today: date
 def get_eligible_districts(
     user=None,
     *,
-    polling_station: PollingStation | None = None,
+    precinct: TerritorialUnit | None = None,
     only_open: bool = True,
     today: date | None = None,
 ) -> QuerySet[ElectoralDistrict]:
     """
-    Okręgi dostępne dla użytkownika.
+    Okręgi dostępne dla użytkownika / obwodu.
 
-    Filtr po hierarchii: obwód wyborcy ∈ poddrzewu territorial_units okręgu.
+    Filtr po hierarchii: obwód ∈ poddrzewu territorial_units okręgu.
     """
-    if user is None and polling_station is None:
+    if user is None and precinct is None:
         return ElectoralDistrict.objects.none()
 
-    if polling_station is not None:
-        effective = polling_station.precinct
+    if precinct is not None:
+        effective = precinct
     else:
         profile = get_voter_profile(user)
         if profile is None or not profile.can_vote():
             return ElectoralDistrict.objects.none()
-        effective = _effective_unit(profile)
+        effective = profile.effective_unit()
         if effective is None:
             return ElectoralDistrict.objects.none()
 
-    # Zbieramy wszystkie ID na ścieżce od obwodu do korzenia.
     ancestor_ids = [u.pk for u in effective.get_ancestors(include_self=True)]
     if not ancestor_ids:
         return ElectoralDistrict.objects.none()
@@ -128,7 +115,6 @@ def get_eligible_districts(
     if only_open:
         qs = qs.filter(office__is_open=True)
 
-    # Filtr wieku — wymagamy znania birth_date.
     if user is not None:
         ref = today or date.today()
         age = user_age_on(user, ref)
@@ -138,9 +124,9 @@ def get_eligible_districts(
     return qs.select_related("office")
 
 
-def get_eligible_offices(user=None, *, polling_station=None, only_open=True):
+def get_eligible_offices(user=None, *, precinct=None, only_open=True):
     """Alias."""
-    return get_eligible_districts(user, polling_station=polling_station, only_open=only_open)
+    return get_eligible_districts(user, precinct=precinct, only_open=only_open)
 
 
 def offices_for_user(user) -> QuerySet[ElectoralDistrict]:

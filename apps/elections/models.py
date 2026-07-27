@@ -8,10 +8,12 @@ class VoterProfile(models.Model):
     """
     Profil wyborcy.
 
-    Każdy użytkownik ma dokładnie jeden profil.
-    `territorial_unit` to węzeł hierarchii (kraj, gmina, obwód…).
-    Aby głosować, użytkownik musi mieć powiązaną `polling_station`
-    (komisja wyborczą → obwód → …).
+    Każdy użytkownik ma dokładnie jeden profil powiązany z węzłem hierarchii
+    (`territorial_unit`: kraj … obwód).
+
+    Głosować może tylko użytkownik przypisany do obwodu wyborczego
+    (`territorial_unit.kind == precinct`). W UI wybór „komisji” ustawia
+    właśnie ten obwód — sama komisja nie jest przechowywana w profilu.
     """
 
     user = models.OneToOneField(
@@ -28,19 +30,9 @@ class VoterProfile(models.Model):
         related_name="residents",
         verbose_name="jednostka terytorialna",
         help_text=(
-            "Węzeł hierarchii, z którym powiązany jest wyborca. "
-            "Minimum: kraj. Jeśli ustawiona komisja, obwód komisji "
-            "jest używany do wyznaczenia uprawnień."
+            "Węzeł hierarchii wyborcy. Minimum: kraj. "
+            "Do głosowania wymagany obwód wyborczy (kind=precinct)."
         ),
-    )
-    polling_station = models.ForeignKey(
-        "geo.PollingStation",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="voters",
-        verbose_name="komisja wyborcza",
-        help_text="Wymagana do głosowania. Komisja musi należeć do obwodu będącego potomkiem territorial_unit.",
     )
     birth_date = models.DateField(
         "data urodzenia",
@@ -54,18 +46,17 @@ class VoterProfile(models.Model):
         verbose_name_plural = "profile wyborców"
 
     def __str__(self) -> str:
-        if self.polling_station_id:
-            return f"{self.user} @ {self.polling_station}"
-        return f"{self.user} ({self.territorial_unit})"
+        if self.territorial_unit_id:
+            return f"{self.user} ({self.territorial_unit})"
+        return f"{self.user}"
 
     def can_vote(self) -> bool:
-        """Użytkownik może głosować tylko jeśli ma przypisaną komisję."""
-        return self.polling_station_id is not None
+        """Głosować może tylko użytkownik przypisany do obwodu."""
+        unit = self.territorial_unit
+        return bool(unit and unit.kind == TerritorialUnit.Kind.PRECINCT)
 
-    def effective_unit(self) -> "TerritorialUnit":
-        """Węzeł używany do wyznaczania uprawnień — obwód komisji lub territorial_unit."""
-        if self.polling_station_id and self.polling_station.precinct_id:
-            return self.polling_station.precinct
+    def effective_unit(self) -> TerritorialUnit | None:
+        """Węzeł używany do wyznaczania uprawnień."""
         return self.territorial_unit
 
 

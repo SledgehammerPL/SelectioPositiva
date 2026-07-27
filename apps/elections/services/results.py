@@ -17,6 +17,7 @@ from elections.models import (
     VoterProfile,
 )
 from elections.services.schulze import SchulzeResult, compute_schulze
+from geo.models import TerritorialUnit
 
 User = get_user_model()
 
@@ -33,9 +34,6 @@ def eligible_voter_count(district: ElectoralDistrict) -> int:
     )
     if not district_unit_ids:
         return 0
-
-    # Zbiór ID komisji, których obwód należy do okręgu
-    from geo.models import TerritorialUnit
 
     def all_descendant_precinct_ids(unit_ids: list[int]) -> list[int]:
         """ID wszystkich obwodów będących potomkami unit_ids."""
@@ -67,7 +65,10 @@ def eligible_voter_count(district: ElectoralDistrict) -> int:
 
     return (
         VoterProfile.objects
-        .filter(polling_station__precinct_id__in=precinct_ids)
+        .filter(
+            territorial_unit_id__in=precinct_ids,
+            territorial_unit__kind=TerritorialUnit.Kind.PRECINCT,
+        )
         .distinct()
         .count()
     )
@@ -76,23 +77,19 @@ def eligible_voter_count(district: ElectoralDistrict) -> int:
 def _eligible_user_ids_for_district(district: ElectoralDistrict) -> list[int]:
     """
     IDs użytkowników uprawnionych do głosowania/kandydowania w okręgu.
-    Kryterium: ich komisja → precinct leży w poddrzewie territorial_units okręgu.
+    Kryterium: ich obwód (territorial_unit) leży w poddrzewie territorial_units okręgu.
     """
-    from elections.services.eligibility import get_eligible_districts
     profiles = VoterProfile.objects.filter(
-        polling_station__isnull=False,
-    ).select_related("polling_station__precinct", "user")
+        territorial_unit__kind=TerritorialUnit.Kind.PRECINCT,
+    ).select_related("territorial_unit", "user")
 
     result = []
     district_unit_ids = set(district.territorial_units.values_list("pk", flat=True))
 
     from elections.models import unit_is_descendant_of_any
     for profile in profiles:
-        try:
-            precinct = profile.polling_station.precinct
-        except Exception:
-            continue
-        if unit_is_descendant_of_any(precinct, district_unit_ids):
+        precinct = profile.territorial_unit
+        if precinct and unit_is_descendant_of_any(precinct, district_unit_ids):
             result.append(profile.user_id)
     return result
 
