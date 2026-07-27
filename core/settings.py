@@ -105,3 +105,72 @@ AUTHENTICATION_BACKENDS = [
 LOGIN_URL = "login"
 LOGIN_REDIRECT_URL = "dashboard"
 LOGOUT_REDIRECT_URL = "login"
+LOGGING = {
+    'version': 1,
+
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{levelname} {asctime} {module} {process:d} {thread:d} {message}',
+            'style': '{',
+        },
+        'simple': {
+            'format': '{asctime} {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'level': 'DEBUG',
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+        },
+        'debug_file': {
+            'level': 'DEBUG',
+            'class': 'logging.FileHandler',
+            'filename': BASE_DIR / 'log/debug.log',
+            'formatter': 'verbose'
+        },
+        'error_file': {
+            'level': 'DEBUG',
+            'class': 'logging.FileHandler',
+            'filename': BASE_DIR / 'log/error.log',
+            'formatter': 'verbose'
+        },
+        'sql_file': {
+            'level': 'DEBUG',
+            'class': 'logging.FileHandler',
+            'filename': BASE_DIR / 'log/sql.log',
+            'formatter': 'simple'
+        }
+    },
+    'loggers': {
+
+        'django.db.backends': {
+            'handlers': ['sql_file'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'django': {
+            'handlers': ['debug_file'],
+            'level': 'DEBUG',
+            'propagate': True,
+        },
+        'error_logger': {
+            'handlers': ['error_file'],
+            'level': 'DEBUG',
+            'propagate': True,
+        },
+        'core': {  # Łapie wszystko co zaczyna się od "apps."
+            'handlers': ['debug_file', 'console'],  # Dodaj 'console' żeby widzieć w terminalu
+            'level': 'DEBUG',
+            'propagate': True,
+        },
+        'apps': {  # Łapie wszystko co zaczyna się od "apps."
+            'handlers': ['debug_file', 'console'],  # Dodaj 'console' żeby widzieć w terminalu
+            'level': 'DEBUG',
+            'propagate': True,
+        },
+    },
+}
+
