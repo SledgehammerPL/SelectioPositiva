@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.core.mail import send_mail
 from django.db.models import Exists, OuterRef
 from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_GET, require_http_methods
+from django.conf import settings
 
 from elections.services import ballot_counts_for_user, get_voter_profile
 from geo.models import PollingStation, TerritorialUnit
@@ -254,3 +256,68 @@ def preview_station_change_api(
             "same_station": same,
         }
     )
+
+
+@require_http_methods(["GET", "POST"])
+def register(request: HttpRequest) -> HttpResponse:
+    from users.forms import RegistrationForm
+    from users.services.registration import (
+        email_verification_token,
+        make_email_uid,
+        register_user,
+    )
+
+    if request.user.is_authenticated:
+        return redirect("dashboard")
+
+    form = RegistrationForm(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        user = register_user(
+            email=form.cleaned_data["email"],
+            birth_date=form.cleaned_data["birth_date"],
+            password=form.cleaned_data["password1"],
+        )
+        uid = make_email_uid(user)
+        token = email_verification_token.make_token(user)
+        verify_url = request.build_absolute_uri(
+            reverse("verify_email", kwargs={"uidb64": uid, "token": token})
+        )
+        try:
+            send_mail(
+                subject="Selectio Positiva — potwierdź rejestrację",
+                message=(
+                    "Witaj!\n\n"
+                    "Kliknij link, aby aktywować konto:\n"
+                    f"{verify_url}\n\n"
+                    "Jeśli nie zakładałeś konta, zignoruj tę wiadomość.\n"
+                ),
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[user.email],
+                fail_silently=False,
+            )
+        except Exception:
+            user.delete()
+            messages.error(
+                request,
+                "Nie udało się wysłać emaila aktywacyjnego. Spróbuj ponownie później.",
+            )
+            return render(request, "registration/register.html", {"form": form})
+        messages.success(
+            request,
+            "Konto utworzone. Sprawdź email i kliknij link aktywacyjny.",
+        )
+        return redirect("login")
+
+    return render(request, "registration/register.html", {"form": form})
+
+
+@require_GET
+def verify_email(request: HttpRequest, uidb64: str, token: str) -> HttpResponse:
+    from users.services.registration import activate_user_from_token
+
+    user = activate_user_from_token(uidb64=uidb64, token=token)
+    if user is None:
+        messages.error(request, "Link aktywacyjny jest nieprawidłowy lub wygasł.")
+        return redirect("login")
+    messages.success(request, "Email potwierdzony. Możesz się zalogować.")
+    return redirect("login")

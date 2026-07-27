@@ -44,7 +44,9 @@ class VoterProfile(models.Model):
         "telefon",
         max_length=16,
         unique=True,
-        help_text="Pełny numer w formacie +48XXXXXXXXX — używany do logowania.",
+        null=True,
+        blank=True,
+        help_text="Opcjonalny numer w formacie +48XXXXXXXXX.",
     )
 
     class Meta:
@@ -315,3 +317,69 @@ class ElectionResultCache(models.Model):
     def __str__(self) -> str:
         state = "stale" if self.is_stale else "fresh"
         return f"Wynik {self.district} ({state})"
+
+
+class CandidateRequest(models.Model):
+    """
+    Prośba wyborcy o dodanie osoby, której nie ma jeszcze w systemie.
+
+    Wyborca może samodzielnie pojawić się w rankingu (jako zarejestrowany
+    użytkownik). Inne osoby dodaje admin po zatwierdzeniu tej prośby.
+    """
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Oczekująca"
+        APPROVED = "approved", "Zatwierdzona"
+        REJECTED = "rejected", "Odrzucona"
+
+    district = models.ForeignKey(
+        ElectoralDistrict,
+        on_delete=models.CASCADE,
+        related_name="candidate_requests",
+        verbose_name="okręg",
+    )
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="candidate_requests",
+        verbose_name="zgłaszający",
+    )
+    first_name = models.CharField("imię", max_length=150)
+    last_name = models.CharField("nazwisko", max_length=150)
+    birth_date = models.DateField("data urodzenia")
+    note = models.TextField("uwaga dla admina", blank=True)
+    status = models.CharField(
+        "status",
+        max_length=16,
+        choices=Status.choices,
+        default=Status.PENDING,
+        db_index=True,
+    )
+    admin_note = models.TextField("notatka admina", blank=True)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reviewed_candidate_requests",
+        verbose_name="rozpatrzył",
+    )
+    reviewed_at = models.DateTimeField("rozpatrzono", null=True, blank=True)
+    created_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_from_candidate_requests",
+        verbose_name="utworzony użytkownik",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "prośba o kandydata"
+        verbose_name_plural = "prośby o kandydatów"
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"{self.first_name} {self.last_name} ({self.get_status_display()})"

@@ -41,10 +41,55 @@
         <input type="date" id="candidate-ac-birth" autocomplete="off">
       </label>
     </div>
+    <div class="ac-actions">
+      {% if can_self_nominate %}
+      <button type="button" class="btn btn-secondary btn-sm" id="btn-add-self">
+        Dodaj mnie
+      </button>
+      {% endif %}
+      <button type="button" class="btn btn-ghost btn-sm" id="btn-request-candidate"
+              aria-expanded="false" aria-controls="candidate-request-panel">
+        Poproś o kandydata
+      </button>
+    </div>
     <p class="ac-status" id="candidate-search-status" aria-live="polite">
-      Zacznij wpisywać, aby zobaczyć podpowiedzi.
+      Zacznij wpisywać, aby zobaczyć podpowiedzi. Siebie możesz dodać od razu;
+      inną osobę spoza listy zgłoś do administratora.
     </p>
   </div>
+
+  <section class="candidate-request-panel" id="candidate-request-panel" hidden>
+    <h2>Poproś o dodanie kandydata</h2>
+    <p class="hint">
+      Jeśli osoby nie ma w systemie, wyślij prośbę. Administrator utworzy konto,
+      a potem będziesz mógł dodać ją do rankingu.
+    </p>
+    <form method="post" action="{% url 'request_candidate' district.slug %}" class="candidate-request-form">
+      {% csrf_token %}
+      <div class="candidate-request-grid">
+        <label class="field">
+          <span>{{ candidate_request_form.first_name.label }}</span>
+          {{ candidate_request_form.first_name }}
+        </label>
+        <label class="field">
+          <span>{{ candidate_request_form.last_name.label }}</span>
+          {{ candidate_request_form.last_name }}
+        </label>
+        <label class="field">
+          <span>{{ candidate_request_form.birth_date.label }}</span>
+          {{ candidate_request_form.birth_date }}
+        </label>
+      </div>
+      <label class="field">
+        <span>{{ candidate_request_form.note.label }}</span>
+        {{ candidate_request_form.note }}
+      </label>
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Wyślij prośbę</button>
+        <button type="button" class="btn btn-ghost" id="btn-cancel-request">Anuluj</button>
+      </div>
+    </form>
+  </section>
 
   <form method="post" id="ranking-form" class="ranking-form ballot-builder">
     {% csrf_token %}
@@ -93,14 +138,16 @@
 </section>
 
 {{ ranked_payload|json_script:"ranked-data" }}
+{{ self_payload|json_script:"self-data" }}
 {% endblock %}
 
 {% block extra_js %}
 <script>
   document.addEventListener('DOMContentLoaded', () => {
+    let ballotApi = null;
     if (window.SelectioBallot) {
       const panel = document.getElementById('candidate-search-panel');
-      window.SelectioBallot.init({
+      ballotApi = window.SelectioBallot.init({
         form: document.getElementById('ranking-form'),
         pool: document.getElementById('candidate-pool'),
         rankList: document.getElementById('candidate-list'),
@@ -109,6 +156,26 @@
         birthEl: document.getElementById('candidate-ac-birth'),
         searchUrl: panel ? panel.dataset.searchUrl : '',
         ranked: JSON.parse(document.getElementById('ranked-data').textContent),
+      });
+    }
+
+    const reqPanel = document.getElementById('candidate-request-panel');
+    const reqBtn = document.getElementById('btn-request-candidate');
+    const cancelBtn = document.getElementById('btn-cancel-request');
+    const toggleReq = (open) => {
+      if (!reqPanel || !reqBtn) return;
+      reqPanel.hidden = !open;
+      reqBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    };
+    if (reqBtn) reqBtn.addEventListener('click', () => toggleReq(reqPanel.hidden));
+    if (cancelBtn) cancelBtn.addEventListener('click', () => toggleReq(false));
+
+    const addSelf = document.getElementById('btn-add-self');
+    if (addSelf && ballotApi) {
+      addSelf.addEventListener('click', () => {
+        const selfEl = document.getElementById('self-data');
+        if (!selfEl) return;
+        ballotApi.addCandidate(JSON.parse(selfEl.textContent));
       });
     }
   });

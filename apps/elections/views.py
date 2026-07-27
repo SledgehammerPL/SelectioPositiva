@@ -12,7 +12,8 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
-from elections.models import Ballot, ElectoralDistrict, VoterProfile
+from elections.forms import CandidateRequestForm
+from elections.models import Ballot, CandidateRequest, ElectoralDistrict, VoterProfile
 from elections.services import (
     ballot_counts_for_user,
     get_cached_result,
@@ -282,6 +283,18 @@ def vote_district(request: HttpRequest, slug: str) -> HttpResponse:
     ranked_by_id = {u.pk: u for u in ranked_users}
     ranked_users_ordered = [ranked_by_id[i] for i in ranked_ids if i in ranked_by_id]
 
+    profile = get_voter_profile(request.user)
+    can_self_nominate = False
+    if profile and profile.territorial_unit_id:
+        can_self_nominate = user_may_run_in_district(
+            profile.territorial_unit, district
+        )
+        min_age = district.office.min_age if district.office_id else 0
+        if can_self_nominate and min_age:
+            age = user_age_on(request.user, date.today())
+            if age is not None and age < min_age:
+                can_self_nominate = False
+
     return render(
         request,
         "elections/vote.html",
@@ -293,8 +306,56 @@ def vote_district(request: HttpRequest, slug: str) -> HttpResponse:
             "search_url": reverse("vote_candidate_search", kwargs={"slug": district.slug}),
             "ballot": ballot,
             "is_update": ballot is not None and not ballot.is_voided,
+            "candidate_request_form": CandidateRequestForm(),
+            "can_self_nominate": can_self_nominate,
+            "self_payload": _user_payload(request.user),
         },
     )
+
+
+@login_required
+@require_POST
+def request_candidate(request: HttpRequest, slug: str) -> HttpResponse:
+    district = get_object_or_404(
+        ElectoralDistrict.objects.select_related("office"),
+        slug=slug,
+    )
+    if not user_can_vote_on(request.user, district):
+        return HttpResponseForbidden("Brak uprawnień.")
+
+    form = CandidateRequestForm(request.POST)
+    if not form.is_valid():
+        messages.error(request, "Sprawdź dane prośby o kandydata.")
+        return redirect("vote_district", slug=district.slug)
+
+    pending = CandidateRequest.objects.filter(
+        district=district,
+        requested_by=request.user,
+        first_name__iexact=form.cleaned_data["first_name"].strip(),
+        last_name__iexact=form.cleaned_data["last_name"].strip(),
+        birth_date=form.cleaned_data["birth_date"],
+        status=CandidateRequest.Status.PENDING,
+    ).exists()
+    if pending:
+        messages.info(
+            request,
+            "Taka prośba już oczekuje na rozpatrzenie przez administratora.",
+        )
+        return redirect("vote_district", slug=district.slug)
+
+    CandidateRequest.objects.create(
+        district=district,
+        requested_by=request.user,
+        first_name=form.cleaned_data["first_name"].strip(),
+        last_name=form.cleaned_data["last_name"].strip(),
+        birth_date=form.cleaned_data["birth_date"],
+        note=form.cleaned_data.get("note") or "",
+    )
+    messages.success(
+        request,
+        "Wysłano prośbę o dodanie kandydata. Administrator rozpatrzy zgłoszenie.",
+    )
+    return redirect("vote_district", slug=district.slug)
 
 
 @login_required

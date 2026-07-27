@@ -5,11 +5,16 @@ from django.utils.translation import gettext_lazy as _
 
 from .models import (
     Ballot,
+    CandidateRequest,
     ElectionResultCache,
     ElectoralDistrict,
     Office,
     Party,
     VoterProfile,
+)
+from .services.candidate_requests import (
+    approve_candidate_request,
+    reject_candidate_request,
 )
 
 User = get_user_model()
@@ -144,3 +149,44 @@ class ElectionResultCacheAdmin(admin.ModelAdmin):
     list_filter = ("is_stale",)
     search_fields = ("district__name", "district__slug")
     readonly_fields = ("fingerprint", "computed_at", "updated_at", "payload")
+
+
+@admin.register(CandidateRequest)
+class CandidateRequestAdmin(admin.ModelAdmin):
+    list_display = (
+        "last_name",
+        "first_name",
+        "birth_date",
+        "district",
+        "requested_by",
+        "status",
+        "created_at",
+    )
+    list_filter = ("status", "district__office")
+    search_fields = (
+        "first_name",
+        "last_name",
+        "requested_by__email",
+        "requested_by__first_name",
+        "requested_by__last_name",
+        "note",
+    )
+    raw_id_fields = ("district", "requested_by", "reviewed_by", "created_user")
+    readonly_fields = ("created_at", "updated_at", "reviewed_at", "created_user")
+    actions = ("approve_selected", "reject_selected")
+
+    @admin.action(description="Zatwierdź i utwórz konto kandydata")
+    def approve_selected(self, request, queryset):
+        done = 0
+        for obj in queryset.filter(status=CandidateRequest.Status.PENDING):
+            approve_candidate_request(obj, reviewer=request.user)
+            done += 1
+        self.message_user(request, f"Zatwierdzono {done} próśb.")
+
+    @admin.action(description="Odrzuć zaznaczone")
+    def reject_selected(self, request, queryset):
+        done = 0
+        for obj in queryset.filter(status=CandidateRequest.Status.PENDING):
+            reject_candidate_request(obj, reviewer=request.user)
+            done += 1
+        self.message_user(request, f"Odrzucono {done} próśb.")

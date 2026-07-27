@@ -13,5 +13,10 @@ urlpatterns = [
         name="vote_candidate_search",
     ),
     path("vote/<slug:slug>/clear/", views.clear_ballot, name="clear_ballot"),
+    path(
+        "vote/<slug:slug>/request-candidate/",
+        views.request_candidate,
+        name="request_candidate",
+    ),
     path("results/", views.results, name="results"),
 ]

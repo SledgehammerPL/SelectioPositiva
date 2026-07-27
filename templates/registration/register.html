@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block title %}Rejestracja — Selectio Positiva{% endblock %}
+
+{% block content %}
+<section class="auth-panel">
+  <p class="eyebrow">Nowe konto</p>
+  <h1 class="auth-brand">Selectio <em>Positiva</em></h1>
+  <p class="lede">Podaj email i datę urodzenia. Wyślemy link aktywacyjny na podany adres.</p>
+
+  <form method="post" class="auth-form" novalidate>
+    {% csrf_token %}
+    {% if form.non_field_errors %}
+    <div class="flash flash-error">{{ form.non_field_errors }}</div>
+    {% endif %}
+    <label class="field">
+      <span>Email</span>
+      {{ form.email }}
+      {% if form.email.errors %}
+      <span class="field-error">{{ form.email.errors.0 }}</span>
+      {% endif %}
+    </label>
+    <label class="field">
+      <span>Data urodzenia</span>
+      {{ form.birth_date }}
+      {% if form.birth_date.errors %}
+      <span class="field-error">{{ form.birth_date.errors.0 }}</span>
+      {% endif %}
+    </label>
+    <label class="field">
+      <span>Hasło</span>
+      {{ form.password1 }}
+      {% if form.password1.errors %}
+      <span class="field-error">{{ form.password1.errors.0 }}</span>
+      {% endif %}
+    </label>
+    <label class="field">
+      <span>Powtórz hasło</span>
+      {{ form.password2 }}
+      {% if form.password2.errors %}
+      <span class="field-error">{{ form.password2.errors.0 }}</span>
+      {% endif %}
+    </label>
+    <button type="submit" class="btn btn-primary btn-block">Załóż konto</button>
+  </form>
+  <p class="hint auth-alt">Masz już konto? <a href="{% url 'login' %}">Zaloguj się</a></p>
+</section>
+{% endblock %}

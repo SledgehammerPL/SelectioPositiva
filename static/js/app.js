@@ -183,6 +183,12 @@
 
       function addCandidate(c) {
         if (!c) return;
+        const id = String(c.id);
+        if (rankedIds().includes(id)) {
+          setStatus("Ta osoba jest już w rankingu.");
+          return;
+        }
+        byId[id] = c;
         rankList.appendChild(makeRankItem(c));
         renumber(rankList);
         syncEmpty();
@@ -191,6 +197,7 @@
           queryEl.focus();
         }
         scheduleSearch();
+        setStatus("Dodano do rankingu.");
       }
 
       function runSearch() {
@@ -326,6 +333,7 @@
       pool.hidden = true;
       setExpanded(false);
       setStatus("Zacznij wpisywać, aby zobaczyć podpowiedzi.");
+      return { addCandidate };
     },
   };
 

@@ -604,6 +604,69 @@ h2 {
   box-shadow: 0 0 0 3px rgba(31, 111, 74, 0.16);
 }
 
+.ac-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.candidate-request-panel {
+  margin: 0 0 1.5rem;
+  padding: 1.15rem 1.25rem 1.25rem;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.candidate-request-panel h2 {
+  font-size: 1.15rem;
+  margin: 0 0 0.35rem;
+}
+
+.candidate-request-form {
+  display: grid;
+  gap: 0.85rem;
+  margin-top: 0.85rem;
+}
+
+.candidate-request-form textarea,
+.candidate-request-form input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.65rem 0.8rem;
+  font: inherit;
+  background: #fff;
+}
+
+.candidate-request-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.auth-alt {
+  margin-top: 1rem;
+}
+
+.auth-alt a {
+  color: var(--accent-deep);
+  font-weight: 600;
+}
+
+.field-error {
+  color: var(--danger);
+  font-weight: 500;
+  font-size: 0.82rem;
+}
+
+@media (max-width: 720px) {
+  .candidate-request-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .ac-list {
   position: absolute;
   left: 0;
