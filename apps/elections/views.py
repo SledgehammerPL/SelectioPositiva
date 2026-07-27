@@ -7,13 +7,13 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import AuthenticationForm
 from django.contrib.auth.views import LoginView, LogoutView
-from django.db.models import Count, Q
+from django.db.models import Q
 from django.http import HttpRequest, HttpResponse, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
-from elections.models import Ballot, ElectoralDistrict, Office, VoterProfile
+from elections.models import Ballot, ElectoralDistrict, VoterProfile
 from elections.services import (
     ballot_counts_for_user,
     get_cached_result,
@@ -22,8 +22,7 @@ from elections.services import (
     user_can_vote_on,
     vote_statuses_for_user,
 )
-from elections.services.eligibility import get_eligible_districts, user_age_on
-from elections.services.results import districts_for_filter, offices_for_unit_filter
+from elections.services.eligibility import get_eligible_districts, user_age_on, user_may_run_in_district
 from geo.models import TerritorialUnit
 
 User = get_user_model()
@@ -119,10 +118,8 @@ def _search_users_for_district(
 
     qs = qs.order_by("last_name", "first_name", "username")
 
-    # Filtr: obwód musi leżeć w okręgu + limit wieku
-    from elections.models import unit_is_descendant_of_any
-    district_unit_ids = set(district.territorial_units.values_list("pk", flat=True))
-    min_age = district.min_age
+    # Filtr terytorialny kandydatury (office.candidacy_level) + wiek (office.min_age)
+    min_age = district.office.min_age if district.office_id else 0
 
     matched = []
     for user in qs[:300]:
@@ -131,9 +128,7 @@ def _search_users_for_district(
         except Exception:
             continue
         precinct = profile.territorial_unit
-        if not precinct or precinct.kind != TerritorialUnit.Kind.PRECINCT:
-            continue
-        if district_unit_ids and not unit_is_descendant_of_any(precinct, district_unit_ids):
+        if not user_may_run_in_district(precinct, district):
             continue
         if min_age:
             age = user_age_on(user, ref)
@@ -231,7 +226,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
 @require_http_methods(["GET", "POST"])
 def vote_district(request: HttpRequest, slug: str) -> HttpResponse:
     district = get_object_or_404(
-        ElectoralDistrict.objects.select_related("office").prefetch_related("territorial_units"),
+        ElectoralDistrict.objects.select_related("office", "office__candidacy_level").prefetch_related("territorial_units"),
         slug=slug,
     )
     if not user_can_vote_on(request.user, district):
@@ -317,7 +312,7 @@ def vote_district(request: HttpRequest, slug: str) -> HttpResponse:
 @require_GET
 def vote_candidate_search(request: HttpRequest, slug: str) -> JsonResponse:
     district = get_object_or_404(
-        ElectoralDistrict.objects.select_related("office").prefetch_related("territorial_units"),
+        ElectoralDistrict.objects.select_related("office", "office__candidacy_level").prefetch_related("territorial_units"),
         slug=slug,
     )
     if not user_can_vote_on(request.user, district):
@@ -362,95 +357,74 @@ def clear_ballot(request: HttpRequest, slug: str) -> HttpResponse:
     return redirect("dashboard")
 
 
+@login_required
 def results(request: HttpRequest) -> HttpResponse:
-    kind = (request.GET.get("kind") or "").strip()
-    unit_id_raw = (request.GET.get("unit") or "").strip()
-    office_slug = (request.GET.get("office") or "").strip()
+    """Wyniki Schulzego wyłącznie dla okręgów dostępnych zalogowanemu użytkownikowi."""
+    profile = get_voter_profile(request.user)
+    districts = list(get_eligible_districts(request.user))
+    district_by_slug = {d.slug: d for d in districts}
+
     district_slug = (request.GET.get("district") or "").strip()
+    selected_district = district_by_slug.get(district_slug)
+    if selected_district is None and len(districts) == 1:
+        selected_district = districts[0]
 
-    kind_choices = TerritorialUnit.Kind.choices
-    selected_unit = None
-    if unit_id_raw.isdigit():
-        selected_unit = TerritorialUnit.objects.filter(pk=int(unit_id_raw)).first()
-        if selected_unit and not kind:
-            kind = selected_unit.kind
-
-    units_qs = TerritorialUnit.objects.all().order_by("kind", "name")
-    if kind:
-        units_qs = units_qs.filter(kind=kind)
-    units = list(units_qs)
-
-    offices = offices_for_unit_filter(
-        kind=kind or None,
-        unit_id=selected_unit.pk if selected_unit else None,
-    )
-
-    selected_office = None
-    if office_slug:
-        selected_office = next((o for o in offices if o.slug == office_slug), None)
-        if selected_office is None:
-            selected_office = Office.objects.filter(slug=office_slug).first()
-
-    districts = districts_for_filter(
-        kind=kind or None,
-        unit_id=selected_unit.pk if selected_unit else None,
-        office_slug=selected_office.slug if selected_office else None,
-    )
-
-    selected_district = None
     result_payload = None
-    if district_slug:
-        selected_district = next((d for d in districts if d.slug == district_slug), None)
-        if selected_district is None:
-            selected_district = (
-                ElectoralDistrict.objects.select_related("office")
-                .filter(slug=district_slug)
+    if selected_district is not None:
+        result_payload = get_cached_result(selected_district)
+
+    map_payload: dict = {"station": None, "units": []}
+    if profile is not None and profile.territorial_unit_id:
+        unit = profile.territorial_unit
+        ancestors = unit.get_ancestors(include_self=True)
+        display_station = None
+        if unit.kind == TerritorialUnit.Kind.PRECINCT:
+            from geo.models import PollingStation
+
+            display_station = (
+                PollingStation.objects.filter(precinct=unit)
+                .order_by("number", "pk")
                 .first()
             )
-            if selected_district:
-                selected_office = selected_district.office
-                kind = ""
-                districts = districts_for_filter(
-                    office_slug=selected_office.slug,
-                )
-        if selected_district is None:
-            selected_district = get_object_or_404(
-                ElectoralDistrict.objects.select_related("office"),
-                slug=district_slug,
-            )
-        result_payload = get_cached_result(selected_district)
-    elif len(districts) == 1:
-        selected_district = districts[0]
-        selected_office = selected_district.office
-        result_payload = get_cached_result(selected_district)
-
-    map_units = list(
-        TerritorialUnit.objects.filter(electoral_districts__isnull=False)
-        .annotate(offices_count=Count("electoral_districts", distinct=True))
-        .distinct()
-        .order_by("kind", "name")
-    )
-    if selected_unit and all(u.pk != selected_unit.pk for u in map_units):
-        selected_unit.offices_count = selected_unit.electoral_districts.count()  # type: ignore[attr-defined]
-        map_units.append(selected_unit)
-
-    map_payload = {
-        "selected_unit_id": selected_unit.pk if selected_unit else None,
-        "results_base": reverse("results"),
-        "units": [
-            {
-                "id": u.pk,
-                "name": u.name,
-                "kind": u.kind,
-                "kind_label": u.get_kind_display(),
-                "boundary": getattr(u, "boundary", None),
-                "center_lat": float(u.center_lat) if getattr(u, "center_lat", None) is not None else None,
-                "center_lng": float(u.center_lng) if getattr(u, "center_lng", None) is not None else None,
-                "offices_count": getattr(u, "offices_count", u.electoral_districts.count()),
-            }
-            for u in map_units
-        ],
-    }
+        map_payload = {
+            "station": (
+                {
+                    "name": display_station.name,
+                    "code": display_station.code,
+                    "address": display_station.address,
+                    "lat": float(display_station.latitude)
+                    if display_station.latitude is not None
+                    else None,
+                    "lng": float(display_station.longitude)
+                    if display_station.longitude is not None
+                    else None,
+                }
+                if display_station
+                else {
+                    "name": str(unit),
+                    "code": unit.slug,
+                    "address": "",
+                    "lat": float(unit.center_lat) if unit.center_lat is not None else None,
+                    "lng": float(unit.center_lng) if unit.center_lng is not None else None,
+                }
+            ),
+            "units": [
+                {
+                    "id": u.pk,
+                    "name": u.name,
+                    "kind": u.kind,
+                    "kind_label": u.get_kind_display(),
+                    "boundary": getattr(u, "boundary", None),
+                    "center_lat": float(u.center_lat)
+                    if getattr(u, "center_lat", None) is not None
+                    else None,
+                    "center_lng": float(u.center_lng)
+                    if getattr(u, "center_lng", None) is not None
+                    else None,
+                }
+                for u in ancestors
+            ],
+        }
 
     ranking_rows = (result_payload or {}).get("ranking") or []
     elected_rows = (result_payload or {}).get("elected") or []
@@ -481,12 +455,7 @@ def results(request: HttpRequest) -> HttpResponse:
         request,
         "elections/results.html",
         {
-            "kind": kind,
-            "kind_choices": kind_choices,
-            "units": units,
-            "selected_unit": selected_unit,
-            "offices": offices,
-            "selected_office": selected_office,
+            "profile": profile,
             "districts": districts,
             "selected_district": selected_district,
             "result": result_payload,

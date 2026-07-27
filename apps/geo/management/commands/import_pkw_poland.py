@@ -14,7 +14,7 @@ from collections import defaultdict
 from django.core.management.base import BaseCommand
 
 from elections.models import ElectoralDistrict, Office
-from geo.models import PollingStation, TerritorialUnit
+from geo.models import PollingStation, TerritorialLevel, TerritorialUnit
 from geo.pkw import (
     SOURCES,
     col,
@@ -24,31 +24,48 @@ from geo.pkw import (
 )
 
 OFFICES = [
-    ("posel-sejm", "Poseł na Sejm RP", "Okręgi sejmowe (PKW 2023).", 10),
-    ("senator", "Senator RP", "Okręgi senackie (PKW 2023).", 20),
+    # slug, name, description, order, min_age, candidacy_level_slug
+    (
+        "eurodeputowany",
+        "Poseł do Europarlamentu",
+        "Wybory do Parlamentu Europejskiego — 13 okręgów.",
+        2,
+        21,
+        "country",
+    ),
+    ("posel-sejm", "Poseł na Sejm RP", "Okręgi sejmowe (PKW 2023).", 10, 21, "country"),
+    ("senator", "Senator RP", "Okręgi senackie (PKW 2023).", 20, 30, "country"),
     (
         "radny-sejmiku",
         "Radny sejmiku województwa",
         "Okręgi do sejmików (PKW samorząd 2024).",
         30,
+        18,
+        "voivodeship",
     ),
     (
         "radny-powiatu",
         "Radny rady powiatu",
         "Okręgi do rad powiatów (PKW samorząd 2024).",
         40,
+        18,
+        "county",
     ),
     (
         "radny-gminy",
         "Radny rady gminy / miasta",
         "Okręgi do rad gmin i miast (PKW samorząd 2024).",
         50,
+        18,
+        "municipality",
     ),
     (
         "wojt-burmistrz-prezydent",
         "Wójt / Burmistrz / Prezydent",
         "Wybory wójtów, burmistrzów i prezydentów (PKW samorząd 2024).",
         60,
+        18,
+        "country",
     ),
 ]
 
@@ -59,7 +76,6 @@ DISTRICT_FIELDS = [
     "name",
     "seats_count",
     "display_order",
-    "min_age",
 ]
 
 
@@ -170,10 +186,20 @@ class Command(BaseCommand):
         )
         wbp = self._wbp_district_map()
 
+        from geo.pkw.euro_districts import ensure_euro_districts
+
+        euro_stats = ensure_euro_districts(office=offices["eurodeputowany"])
+        self.stdout.write(
+            f"Okręgi PE: {euro_stats['districts']} "
+            f"(new={euro_stats['created']}, upd={euro_stats['updated']}, "
+            f"units={euro_stats['linked_units']})"
+        )
+
         self.stdout.write(
             f"Okręgi: sejm={len(sejm)} senat={len(senat)} "
             f"sejmik={len(sejmik)} rada_powiat={len(rada_powiat)} "
-            f"rada_gminy={len(rada_gminy)} wbp={mayor_count}"
+            f"rada_gminy={len(rada_gminy)} wbp={mayor_count} "
+            f"euro={euro_stats['districts']}"
         )
 
         if not options["skip_stations"]:
@@ -314,8 +340,9 @@ class Command(BaseCommand):
         self.stdout.flush()
 
     def _ensure_offices(self) -> dict[str, Office]:
+        levels = {lvl.slug: lvl for lvl in TerritorialLevel.objects.all()}
         out: dict[str, Office] = {}
-        for slug, name, desc, order in OFFICES:
+        for slug, name, desc, order, min_age, level_slug in OFFICES:
             office, _ = Office.objects.update_or_create(
                 slug=slug,
                 defaults={
@@ -323,6 +350,8 @@ class Command(BaseCommand):
                     "description": desc,
                     "is_open": True,
                     "display_order": order,
+                    "min_age": min_age,
+                    "candidacy_level": levels.get(level_slug),
                 },
             )
             out[slug] = office
@@ -403,7 +432,6 @@ class Command(BaseCommand):
             to_update: list[ElectoralDistrict] = []
             for s in chunk:
                 seats = max(1, int(s.get("seats_count") or 1))
-                min_age = int(s.get("min_age") or 18)
                 cur = existing.get(s["slug"])
                 if cur is None:
                     to_create.append(
@@ -412,7 +440,6 @@ class Command(BaseCommand):
                             office_id=s["office_id"],
                             name=s["name"][:200],
                             seats_count=seats,
-                            min_age=min_age,
                             display_order=int(s.get("display_order") or 0),
                         )
                     )
@@ -420,7 +447,6 @@ class Command(BaseCommand):
                     cur.office_id = s["office_id"]
                     cur.name = s["name"][:200]
                     cur.seats_count = seats
-                    cur.min_age = min_age
                     cur.display_order = int(s.get("display_order") or 0)
                     to_update.append(cur)
             if to_create:

@@ -1,6 +1,33 @@
 from django.db import models
 
 
+class TerritorialLevel(models.Model):
+    """
+    Poziom w hierarchii terytorialnej (katalog).
+
+    Używany przez urzędy do określenia, na jakim poziomie kandydat
+    musi „zgadzać się” z okręgiem (np. kraj / województwo / gmina).
+    Wartość `slug` odpowiada polu `TerritorialUnit.kind`.
+    """
+
+    name = models.CharField("nazwa", max_length=100)
+    slug = models.SlugField("slug", max_length=40, unique=True)
+    display_order = models.PositiveSmallIntegerField(
+        "kolejność",
+        default=0,
+        help_text="Mniejsza wartość = szerszy zasięg (kraj=0, …, obwód=4).",
+        db_index=True,
+    )
+
+    class Meta:
+        verbose_name = "poziom terytorialny"
+        verbose_name_plural = "poziomy terytorialne"
+        ordering = ["display_order", "name"]
+
+    def __str__(self) -> str:
+        return self.name
+
+
 class TerritorialUnit(models.Model):
     """
     Węzeł hierarchii administracyjno-wyborczej.

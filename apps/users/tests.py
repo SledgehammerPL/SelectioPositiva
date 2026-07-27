@@ -3,11 +3,16 @@ from django.test import TestCase
 
 from elections.models import Ballot, ElectoralDistrict, Office, VoterProfile
 from elections.services import get_eligible_districts
+from elections.services.eligibility import user_may_run_in_district
 from elections.services.results import compute_district_schulze
-from geo.models import PollingStation, TerritorialUnit
+from geo.models import PollingStation, TerritorialLevel, TerritorialUnit
 from users.services.station_change import change_user_polling_station
 
 User = get_user_model()
+
+
+def _level(slug: str) -> TerritorialLevel:
+    return TerritorialLevel.objects.get(slug=slug)
 
 
 def _make_hierarchy(prefix: str):
@@ -138,8 +143,16 @@ class EligibilityByHierarchyTests(TestCase):
         self.station_ktw = _make_station("EH-KTW", self.precinct)
         self.station_waw = _make_station("EH-WAW", precinct2)
 
-        office = Office.objects.create(name="Rada gminy", slug="eh-rada")
-        office_nat = Office.objects.create(name="Prezydent", slug="eh-prez")
+        office = Office.objects.create(
+            name="Rada gminy",
+            slug="eh-rada",
+            candidacy_level=_level("municipality"),
+        )
+        office_nat = Office.objects.create(
+            name="Prezydent",
+            slug="eh-prez",
+            candidacy_level=_level("country"),
+        )
 
         self.district_local = ElectoralDistrict.objects.create(
             office=office, name="Rada gminy Katowice", slug="eh-d-rada", seats_count=3
@@ -167,3 +180,14 @@ class EligibilityByHierarchyTests(TestCase):
         user = User.objects.create_user("eh_nostation", password="x")
         eligible = get_eligible_districts(user)
         self.assertFalse(eligible.exists())
+
+    def test_candidacy_country_allows_other_municipality(self):
+        """Poziom kraj → kandydat spoza gminy okręgu może startować."""
+        user = _make_user("eh_cand_waw", self.station_waw)
+        precinct = user.voter_profile.territorial_unit
+        self.assertTrue(user_may_run_in_district(precinct, self.district_nat))
+
+    def test_candidacy_municipality_blocks_other_city(self):
+        user = _make_user("eh_cand_block", self.station_waw)
+        precinct = user.voter_profile.territorial_unit
+        self.assertFalse(user_may_run_in_district(precinct, self.district_local))

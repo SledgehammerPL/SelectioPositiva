@@ -795,6 +795,26 @@ h2 {
   box-shadow: var(--shadow);
 }
 
+.results-nav-title {
+  margin: 0 0 0.85rem;
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.results-district-nav {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.65rem;
+}
+
+.results-district-nav .office-row.is-active {
+  border-color: var(--accent);
+  background: rgba(20, 120, 90, 0.06);
+}
+
 .filter-form {
   display: grid;
   gap: 0.9rem;

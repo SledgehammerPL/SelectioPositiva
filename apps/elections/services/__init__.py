@@ -9,6 +9,7 @@ from elections.services.eligibility import (
     get_voter_profile,
     offices_for_user,
     user_can_vote_on,
+    user_may_run_in_district,
     vote_statuses_for_user,
 )
 from elections.services.results import (
@@ -42,5 +43,6 @@ __all__ = [
     "recompute_district_results",
     "recompute_office_results",
     "user_can_vote_on",
+    "user_may_run_in_district",
     "vote_statuses_for_user",
 ]

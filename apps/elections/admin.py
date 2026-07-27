@@ -39,15 +39,22 @@ class PartyAdmin(admin.ModelAdmin):
 
 @admin.register(Office)
 class OfficeAdmin(admin.ModelAdmin):
-    list_display = ("name", "is_open", "display_order")
-    list_filter = ("is_open",)
+    list_display = (
+        "name",
+        "min_age",
+        "candidacy_level",
+        "is_open",
+        "display_order",
+    )
+    list_filter = ("is_open", "candidacy_level")
     search_fields = ("name", "slug")
     prepopulated_fields = {"slug": ("name",)}
+    autocomplete_fields = ("candidacy_level",)
 
 
 @admin.register(ElectoralDistrict)
 class ElectoralDistrictAdmin(admin.ModelAdmin):
-    list_display = ("name", "office", "seats_count", "min_age", "display_order")
+    list_display = ("name", "office", "seats_count", "display_order")
     list_filter = ("office",)
     search_fields = ("name", "slug", "office__name")
     prepopulated_fields = {"slug": ("name",)}

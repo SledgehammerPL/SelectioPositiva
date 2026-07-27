@@ -1,74 +1,55 @@
 {% extends "base.html" %}
 
-{% block title %}Wyniki wyborów — Selectio Positiva{% endblock %}
+{% block title %}Twoje wyniki — Selectio Positiva{% endblock %}
 
 {% block content %}
 <section class="results-hero">
   <p class="eyebrow">Metoda Schulzego · beatpath</p>
-  <h1>Wyniki wyborów</h1>
-  <p class="lede">Wybierz urząd i okręg wyborczy. Liczba mandatów jest właściwością okręgu.</p>
+  <h1>Twoje wyniki</h1>
+  <p class="lede">
+    Rankingi tylko w okręgach, w których możesz głosować
+    {% if profile and profile.territorial_unit %}
+    ({{ profile.territorial_unit }}).
+    {% else %}
+    — najpierw ustaw obwód w panelu.
+    {% endif %}
+  </p>
 </section>
 
+{% if not districts %}
+<p class="empty">
+  Brak okręgów dla Twojego obwodu.
+  <a href="{% url 'change_station' %}">Wybierz komisję</a>
+  lub wróć do <a href="{% url 'dashboard' %}">panelu</a>.
+</p>
+{% else %}
 <section class="results-layout">
   <aside class="results-filters">
-    <form method="get" class="filter-form" id="results-filter-form">
-      <label class="field">
-        <span>Poziom terytorialny</span>
-        <select name="kind" id="filter-kind">
-          <option value="">Wszystkie poziomy</option>
-          {% for value, label in kind_choices %}
-          <option value="{{ value }}" {% if kind == value %}selected{% endif %}>{{ label }}</option>
-          {% endfor %}
-        </select>
-      </label>
-
-      <label class="field">
-        <span>Jednostka</span>
-        <select name="unit" id="filter-unit">
-          <option value="">Wszystkie jednostki</option>
-          {% for u in units %}
-          <option value="{{ u.pk }}" {% if selected_unit and selected_unit.pk == u.pk %}selected{% endif %}>
-            {{ u.get_kind_display }}: {{ u.name }}
-          </option>
-          {% endfor %}
-        </select>
-      </label>
-
-      <label class="field">
-        <span>Urząd</span>
-        <select name="office" id="filter-office">
-          <option value="">Wybierz urząd…</option>
-          {% for o in offices %}
-          <option value="{{ o.slug }}" {% if selected_office and selected_office.slug == o.slug %}selected{% endif %}>
-            {{ o.name }}
-          </option>
-          {% endfor %}
-        </select>
-      </label>
-
-      <label class="field">
-        <span>Okręg wyborczy</span>
-        <select name="district" id="filter-district">
-          <option value="">Wybierz okręg…</option>
-          {% for d in districts %}
-          <option value="{{ d.slug }}" {% if selected_district and selected_district.slug == d.slug %}selected{% endif %}>
-            {{ d.name }} ({{ d.seats_count }} mand.)
-          </option>
-          {% endfor %}
-        </select>
-      </label>
-
-      <button type="submit" class="btn btn-primary btn-block">Pokaż wyniki</button>
-    </form>
+    <h2 class="results-nav-title">Twoje okręgi</h2>
+    <ul class="office-list compact results-district-nav">
+      {% for d in districts %}
+      <li class="office-row {% if selected_district and selected_district.pk == d.pk %}is-active{% endif %}">
+        <div class="office-meta">
+          <h3>{{ d.office.name }}</h3>
+          <p class="office-scope">{{ d.name }} · {{ d.seats_count }} mand.</p>
+        </div>
+        <a class="btn {% if selected_district and selected_district.pk == d.pk %}btn-primary{% else %}btn-secondary{% endif %}"
+           href="{% url 'results' %}?district={{ d.slug }}">
+          {% if selected_district and selected_district.pk == d.pk %}Wybrane{% else %}Wynik{% endif %}
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
   </aside>
 
   <div class="results-main">
-    <section class="map-section" aria-label="Mapa wyników">
+    {% if profile %}
+    <section class="map-section" aria-label="Twoje terytorium wyborcze">
       <div class="map-legend" id="map-legend"></div>
-      <div id="results-map" class="election-map results-map"></div>
-      {{ map_payload_json|json_script:"results-map-payload" }}
-      <p class="hint map-hint">Kliknij obszar na mapie, aby odfiltrować okręgi powiązane z tą jednostką.</p>
+      <div id="election-map" class="election-map results-map"></div>
+      {{ map_payload_json|json_script:"map-payload" }}
     </section>
+    {% endif %}
 
     {% if selected_district and result %}
     <section class="result-panel">
@@ -76,9 +57,7 @@
         <h2>{{ selected_district.office.name }}</h2>
         <p>
           Okręg: <strong>{{ selected_district.name }}</strong>
-          · Liczba mandatów do obsadzenia: <strong>{{ seats_count }}</strong>
-          · {{ selected_district.territorial_unit.get_kind_display }}:
-          {{ selected_district.territorial_unit.name }}
+          · Mandaty: <strong>{{ seats_count }}</strong>
         </p>
       </header>
 
@@ -180,39 +159,19 @@
         </div>
       </details>
     </section>
-    {% elif districts %}
-    <p class="empty">Wybierz okręg z listy lub kliknij obszar na mapie.</p>
-    <ul class="office-list compact">
-      {% for d in districts %}
-      <li class="office-row">
-        <div class="office-meta">
-          <h3>{{ d.office.name }}</h3>
-          <p class="office-scope">{{ d.name }} · mandaty: {{ d.seats_count }}</p>
-        </div>
-        <a class="btn btn-secondary"
-           href="{% url 'results' %}?kind={{ d.territorial_unit.kind }}&unit={{ d.territorial_unit_id }}&office={{ d.office.slug }}&district={{ d.slug }}">
-          Zobacz wynik
-        </a>
-      </li>
-      {% endfor %}
-    </ul>
     {% else %}
-    <p class="empty">Brak okręgów dla wybranego filtra.</p>
+    <p class="empty">Wybierz okręg z listy po lewej, aby zobaczyć wynik Schulzego.</p>
     {% endif %}
   </div>
 </section>
+{% endif %}
 {% endblock %}
 
 {% block extra_js %}
 <script>
   document.addEventListener('DOMContentLoaded', () => {
-    const form = document.getElementById('results-filter-form');
-    ['filter-kind', 'filter-unit', 'filter-office', 'filter-district'].forEach((id) => {
-      const el = document.getElementById(id);
-      if (el) el.addEventListener('change', () => form.requestSubmit());
-    });
-    if (window.SelectioResultsMap) {
-      window.SelectioResultsMap.init(document.getElementById('results-map'));
+    if (window.SelectioMap) {
+      window.SelectioMap.init(document.getElementById('election-map'));
     }
   });
 </script>

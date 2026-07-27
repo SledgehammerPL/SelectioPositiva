@@ -16,9 +16,23 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 
 from elections.models import ElectoralDistrict, Office, Party, VoterProfile
-from geo.models import PollingStation, TerritorialUnit
+from geo.models import PollingStation, TerritorialLevel, TerritorialUnit
 
 User = get_user_model()
+
+# slug → (min_age, candidacy_level_slug)
+OFFICE_CONSTRAINTS = {
+    "prezydent-rp": (35, "country"),
+    "eurodeputowany": (21, "country"),
+    "posel-sejm": (21, "country"),
+    "senator": (30, "country"),
+    "prezydent-miasta": (18, "country"),
+    "wojt-burmistrz-prezydent": (18, "country"),
+    "radny-sejmiku": (18, "voivodeship"),
+    "radny-powiatu": (18, "county"),
+    "radny-gminy": (18, "municipality"),
+    "radny": (18, "municipality"),
+}
 
 # Slugi/kody tworzone kiedyś przez seed — do usunięcia przy obecności PKW.
 DEMO_UNIT_SLUGS = (
@@ -95,6 +109,7 @@ class Command(BaseCommand):
             return
 
         # ── Urzędy (tylko brakujące / aktualizacja metadanych) ───────────────
+        levels = {lvl.slug: lvl for lvl in TerritorialLevel.objects.all()}
         offices_data = [
             ("prezydent-rp", "Prezydent RP", "Wybory ogólnokrajowe.", 1),
             ("eurodeputowany", "Poseł do Europarlamentu", "Mandaty europejskie.", 2),
@@ -105,9 +120,16 @@ class Command(BaseCommand):
             ("radny-gminy", "Radny rady gminy / miasta", "Okręgi do rad gmin.", 50),
             ("radny-powiatu", "Radny rady powiatu", "Okręgi do rad powiatów.", 40),
             ("radny-sejmiku", "Radny sejmiku województwa", "Okręgi do sejmików.", 30),
+            (
+                "wojt-burmistrz-prezydent",
+                "Wójt / Burmistrz / Prezydent",
+                "Wybory samorządowe — wójt/burmistrz/prezydent.",
+                60,
+            ),
         ]
         offices: dict[str, Office] = {}
         for slug, name, desc, order in offices_data:
+            min_age, level_slug = OFFICE_CONSTRAINTS.get(slug, (18, "municipality"))
             office, _ = Office.objects.update_or_create(
                 slug=slug,
                 defaults={
@@ -115,6 +137,8 @@ class Command(BaseCommand):
                     "description": desc,
                     "is_open": True,
                     "display_order": order,
+                    "min_age": min_age,
+                    "candidacy_level": levels.get(level_slug),
                 },
             )
             offices[slug] = office
@@ -140,7 +164,6 @@ class Command(BaseCommand):
                 office=offices["prezydent-rp"],
                 name="Okręg ogólnopolski",
                 seats_count=1,
-                min_age=35,
                 display_order=1,
             )
             d.territorial_units.set([poland])

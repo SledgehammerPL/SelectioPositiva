@@ -26,73 +26,50 @@ def eligible_voter_count(district: ElectoralDistrict) -> int:
     """
     Liczba wyborców uprawnionych do głosowania w okręgu.
 
-    Wyborca jest uprawniony, gdy jego obwód (lub przodek) leży wśród
-    `district.territorial_units`.
+    Iteruje profile z obwodem (jest ich mało względem drzewa PKW) i sprawdza,
+    czy obwód leży w poddrzewie jednostek okręgu — zamiast BFS po wszystkich
+    obwodach województwa.
     """
-    district_unit_ids = list(
+    from elections.models import unit_is_descendant_of_any
+
+    district_unit_ids = set(
         district.territorial_units.values_list("pk", flat=True)
     )
     if not district_unit_ids:
         return 0
 
-    def all_descendant_precinct_ids(unit_ids: list[int]) -> list[int]:
-        """ID wszystkich obwodów będących potomkami unit_ids."""
-        result = set()
-        queue = list(unit_ids)
-        while queue:
-            batch_ids = queue[:200]
-            queue = queue[200:]
-            children = list(
-                TerritorialUnit.objects.filter(parent_id__in=batch_ids)
-                .values_list("pk", "kind")
-            )
-            for pk, kind in children:
-                if kind == TerritorialUnit.Kind.PRECINCT:
-                    result.add(pk)
-                else:
-                    queue.append(pk)
-        # Jeśli same jednostki są obwodami — też je dodaj.
-        precincts = list(
-            TerritorialUnit.objects.filter(pk__in=unit_ids, kind=TerritorialUnit.Kind.PRECINCT)
-            .values_list("pk", flat=True)
-        )
-        result.update(precincts)
-        return list(result)
-
-    precinct_ids = all_descendant_precinct_ids(district_unit_ids)
-    if not precinct_ids:
-        return 0
-
-    return (
-        VoterProfile.objects
-        .filter(
-            territorial_unit_id__in=precinct_ids,
-            territorial_unit__kind=TerritorialUnit.Kind.PRECINCT,
-        )
-        .distinct()
-        .count()
+    profiles = VoterProfile.objects.filter(
+        territorial_unit__kind=TerritorialUnit.Kind.PRECINCT,
+    ).select_related(
+        "territorial_unit",
+        "territorial_unit__parent",
+        "territorial_unit__parent__parent",
+        "territorial_unit__parent__parent__parent",
+        "territorial_unit__parent__parent__parent__parent",
+    )
+    return sum(
+        1
+        for profile in profiles
+        if profile.territorial_unit_id
+        and unit_is_descendant_of_any(profile.territorial_unit, district_unit_ids)
     )
 
 
 def _eligible_user_ids_for_district(district: ElectoralDistrict) -> list[int]:
     """
-    IDs użytkowników uprawnionych do głosowania/kandydowania w okręgu.
-    Kryterium: ich obwód (territorial_unit) leży w poddrzewie territorial_units okręgu.
+    Pula kandydatów Schulzego dla okręgu.
+
+    Bierzemy wyłącznie użytkowników obecnych na kartach do głosowania
+    (rankingach) — nie skanujemy wszystkich wyborców w kraju.
+    Osoby nigdy nieumieszczone w rankingu nie wchodzą do macierzy pairwise.
     """
-    profiles = VoterProfile.objects.filter(
-        territorial_unit__kind=TerritorialUnit.Kind.PRECINCT,
-    ).select_related("territorial_unit", "user")
-
-    result = []
-    district_unit_ids = set(district.territorial_units.values_list("pk", flat=True))
-
-    from elections.models import unit_is_descendant_of_any
-    for profile in profiles:
-        precinct = profile.territorial_unit
-        if precinct and unit_is_descendant_of_any(precinct, district_unit_ids):
-            result.append(profile.user_id)
-    return result
-
+    ids: set[int] = set()
+    for ranked in Ballot.objects.filter(
+        district=district, is_voided=False
+    ).values_list("ranked_user_ids", flat=True):
+        if ranked:
+            ids.update(int(x) for x in ranked)
+    return sorted(ids)
 
 def ballot_fingerprint(district: ElectoralDistrict) -> str:
     rows = (
@@ -258,6 +235,15 @@ def districts_for_filter(
     office_id: int | None = None,
     office_slug: str | None = None,
 ) -> list[ElectoralDistrict]:
+    """
+    Lista okręgów do filtra wyników.
+
+    Bez urzędu ani jednostki — pusta lista (nie ładujemy dziesiątek tysięcy
+    okręgów PKW na start).
+    """
+    if not office_id and not office_slug and not unit_id:
+        return []
+
     qs = ElectoralDistrict.objects.select_related("office").annotate(
         _ballot_count=Count("ballots")
     )
@@ -272,12 +258,58 @@ def districts_for_filter(
     return list(qs.order_by("office__display_order", "display_order", "name").distinct())
 
 
+# Poziomy na mapie wyników (bez powiatów/gmin/obwodów — za dużo rekordów PKW).
+_RESULTS_MAP_KINDS = (
+    TerritorialUnit.Kind.COUNTRY,
+    TerritorialUnit.Kind.VOIVODESHIP,
+)
+
+
+def map_units_for_results(*, selected_unit: TerritorialUnit | None = None) -> list[TerritorialUnit]:
+    """
+    Jednostki na mapę wyników: kraj + województwa powiązane z okręgami.
+    """
+    qs = (
+        TerritorialUnit.objects.filter(
+            kind__in=_RESULTS_MAP_KINDS,
+            electoral_districts__isnull=False,
+        )
+        .annotate(offices_count=Count("electoral_districts", distinct=True))
+        .distinct()
+        .order_by("kind", "name")
+    )
+    units = list(qs)
+    if selected_unit and all(u.pk != selected_unit.pk for u in units):
+        selected_unit.offices_count = selected_unit.electoral_districts.count()  # type: ignore[attr-defined]
+        units.append(selected_unit)
+    return units
+
+def filter_units_for_results(*, kind: str | None = None) -> list[TerritorialUnit]:
+    """
+    Opcje selecta „Jednostka”: bez obwodów; przy braku kind — tylko województwa.
+    """
+    effective_kind = kind or TerritorialUnit.Kind.VOIVODESHIP
+    if effective_kind == TerritorialUnit.Kind.PRECINCT:
+        return []
+    return list(
+        TerritorialUnit.objects.filter(
+            kind=effective_kind,
+            electoral_districts__isnull=False,
+        )
+        .distinct()
+        .order_by("name")
+        .only("id", "name", "kind", "slug")
+    )
+
 def offices_for_unit_filter(
     *,
     kind: str | None = None,
     unit_id: int | None = None,
 ) -> list[Office]:
     """Urzędy mające okręgi w danym filtrze terytorialnym."""
+    if not kind and not unit_id:
+        return list(Office.objects.order_by("display_order", "name"))
+
     district_qs = ElectoralDistrict.objects.all()
     if kind:
         district_qs = district_qs.filter(territorial_units__kind=kind)

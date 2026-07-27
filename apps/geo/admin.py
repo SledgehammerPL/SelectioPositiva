@@ -1,6 +1,14 @@
 from django.contrib import admin
 
-from .models import PollingStation, TerritorialUnit
+from .models import PollingStation, TerritorialLevel, TerritorialUnit
+
+
+@admin.register(TerritorialLevel)
+class TerritorialLevelAdmin(admin.ModelAdmin):
+    list_display = ("name", "slug", "display_order")
+    search_fields = ("name", "slug")
+    ordering = ("display_order", "name")
+    prepopulated_fields = {"slug": ("name",)}
 
 
 @admin.register(TerritorialUnit)

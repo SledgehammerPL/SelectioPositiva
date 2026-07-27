@@ -83,7 +83,12 @@ class Party(models.Model):
 
 
 class Office(models.Model):
-    """Urząd / rodzaj mandatu (np. Poseł na Sejm RP, Prezydent Miasta)."""
+    """
+    Urząd / rodzaj mandatu (np. Poseł na Sejm RP, Prezydent Miasta).
+
+    Ograniczenia (wiek, poziom terytorialny kandydatury) ustawiane są tu,
+    nie na poziomie pojedynczego okręgu.
+    """
 
     name = models.CharField("nazwa", max_length=200)
     slug = models.SlugField("slug", max_length=200, unique=True)
@@ -92,6 +97,24 @@ class Office(models.Model):
         "głosowanie otwarte",
         default=True,
         help_text="Czy użytkownicy mogą oddawać i zmieniać głosy na okręgi tego urzędu.",
+    )
+    min_age = models.PositiveSmallIntegerField(
+        "minimalny wiek",
+        default=18,
+        help_text="Minimalny wiek (w latach) wymagany do głosowania i kandydowania.",
+    )
+    candidacy_level = models.ForeignKey(
+        "geo.TerritorialLevel",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="offices",
+        verbose_name="poziom kandydatury",
+        help_text=(
+            "Na jakim poziomie hierarchii kandydat musi pokrywać się z okręgiem. "
+            "Np. kraj = każdy z kraju; gmina = ta sama gmina; "
+            "województwo = to samo województwo."
+        ),
     )
     display_order = models.PositiveIntegerField("kolejność", default=0)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -119,7 +142,7 @@ class ElectoralDistrict(models.Model):
     - Sejm okręg 31 → [powiat katowicki, powiat bielski, …]
     - Rada gminy okręg 3 → [obwód 3 w gminie Katowice]
 
-    `min_age` — minimalne wymagane lat do głosowania i do kandydowania.
+    Wiek i poziom kandydatury: patrz `Office`.
     """
 
     office = models.ForeignKey(
@@ -145,11 +168,6 @@ class ElectoralDistrict(models.Model):
         "liczba mandatów",
         default=1,
         help_text="Ile mandatów obsadzanych jest w tym okręgu (metoda Schulzego).",
-    )
-    min_age = models.PositiveSmallIntegerField(
-        "minimalny wiek",
-        default=18,
-        help_text="Minimalny wiek (w latach) wymagany do głosowania i kandydowania w tym okręgu.",
     )
     display_order = models.PositiveIntegerField("kolejność", default=0)
     created_at = models.DateTimeField(auto_now_add=True)
