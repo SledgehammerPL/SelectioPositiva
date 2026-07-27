@@ -24,35 +24,31 @@ from geo.pkw import (
 )
 
 OFFICES = [
-    ("posel-sejm", "Poseł na Sejm RP", "Okręgi sejmowe (PKW 2023).", 10, False),
-    ("senator", "Senator RP", "Okręgi senackie (PKW 2023).", 20, False),
+    ("posel-sejm", "Poseł na Sejm RP", "Okręgi sejmowe (PKW 2023).", 10),
+    ("senator", "Senator RP", "Okręgi senackie (PKW 2023).", 20),
     (
         "radny-sejmiku",
         "Radny sejmiku województwa",
         "Okręgi do sejmików (PKW samorząd 2024).",
         30,
-        True,
     ),
     (
         "radny-powiatu",
         "Radny rady powiatu",
         "Okręgi do rad powiatów (PKW samorząd 2024).",
         40,
-        True,
     ),
     (
         "radny-gminy",
         "Radny rady gminy / miasta",
         "Okręgi do rad gmin i miast (PKW samorząd 2024).",
         50,
-        True,
     ),
     (
         "wojt-burmistrz-prezydent",
         "Wójt / Burmistrz / Prezydent",
         "Wybory wójtów, burmistrzów i prezydentów (PKW samorząd 2024).",
         60,
-        False,
     ),
 ]
 
@@ -61,9 +57,9 @@ UNIT_FIELDS = ["name", "kind", "teryt", "parent_id"]
 DISTRICT_FIELDS = [
     "office_id",
     "name",
-    "territorial_unit_id",
     "seats_count",
     "display_order",
+    "min_age",
 ]
 
 
@@ -87,12 +83,12 @@ class Command(BaseCommand):
         parser.add_argument(
             "--skip-served",
             action="store_true",
-            help="Pomiń budowę served_units.",
+            help="Pomiń budowę territorial_units okręgów.",
         )
         parser.add_argument(
             "--only-served",
             action="store_true",
-            help="Tylko zbuduj served_units (wymaga wcześniejszego importu).",
+            help="Tylko odbuduj territorial_units okręgów (wymaga wcześniejszego importu).",
         )
         parser.add_argument(
             "--only-stations",
@@ -108,30 +104,15 @@ class Command(BaseCommand):
             self.stdout.write(f"  {key}: {path.name} ({path.stat().st_size} B)")
 
         if options["only_served"]:
-            poland = self._ensure_poland()
-            admin = self._load_admin_maps()
-            sejm = self._districts_by_prefix("sejm-")
-            senat = self._districts_by_prefix("senat-")
-            sejmik = self._sejmik_district_map()
-            rada_powiat = self._keyed_district_map("rada-powiat-", key_len=4)
-            rada_gminy = self._keyed_district_map("rada-gminy-", key_len=6)
-            wbp = self._wbp_district_map()
-            stats = self._build_served_units(
-                paths=paths,
-                poland=poland,
-                admin=admin,
-                sejm=sejm,
-                senat=senat,
-                sejmik=sejmik,
-                rada_powiat=rada_powiat,
-                rada_gminy=rada_gminy,
-                wbp=wbp,
+            from geo.pkw.district_units import rebuild_district_units
+
+            stats = rebuild_district_units(
+                paths, log=lambda msg: self.stdout.write(f"  {msg}")
             )
             self.stdout.write(
                 self.style.SUCCESS(
-                    f"served: komisje={stats['stations']} "
-                    f"units={stats['unit_links']} districts={stats['district_links']} "
-                    f"braki_mapowań_sejm={stats['missing']}"
+                    f"district_units: links={stats['links']} "
+                    f"with_units={stats['districts_with_units']}/{stats['districts_pkw']}"
                 )
             )
             return
@@ -204,22 +185,16 @@ class Command(BaseCommand):
             )
 
         if not options["skip_served"]:
-            stats = self._build_served_units(
-                paths=paths,
-                poland=poland,
-                admin=admin,
-                sejm=sejm,
-                senat=senat,
-                sejmik=sejmik,
-                rada_powiat=rada_powiat,
-                rada_gminy=rada_gminy,
-                wbp=wbp,
+            from geo.pkw.district_units import rebuild_district_units
+
+            stats = rebuild_district_units(
+                paths, log=lambda msg: self.stdout.write(f"  {msg}")
             )
             self.stdout.write(
                 self.style.SUCCESS(
-                    f"served: komisje={stats['stations']} "
-                    f"units={stats['unit_links']} districts={stats['district_links']} "
-                    f"braki_mapowań_sejm={stats['missing']}"
+                    f"district_units: links={stats['links']} "
+                    f"with_units={stats['districts_with_units']}/{stats['districts_pkw']} "
+                    f"fallback={stats['fallback']}"
                 )
             )
 
@@ -292,13 +267,8 @@ class Command(BaseCommand):
 
     def _cleanup_legacy_district_units(self) -> int:
         """Usuwa TerritorialUnit kind=district (okręgi nie należą do geo)."""
-        from elections.models import Candidate
-
-        district_ids = list(
-            TerritorialUnit.objects.filter(
-                kind=TerritorialUnit.Kind.DISTRICT
-            ).values_list("pk", flat=True)
-        )
+        district_qs = TerritorialUnit.objects.filter(kind=TerritorialUnit.Kind.DISTRICT)
+        district_ids = list(district_qs.values_list("pk", flat=True))
         if not district_ids:
             return 0
         poland = TerritorialUnit.objects.filter(slug="polska").first()
@@ -329,49 +299,13 @@ class Command(BaseCommand):
                 children, ["parent_id"], batch_size=1000
             )
 
-        eds = list(
-            ElectoralDistrict.objects.filter(
-                territorial_unit_id__in=district_ids
-            ).only("id", "territorial_unit_id")
+        Through = ElectoralDistrict.territorial_units.through
+        Through.objects.filter(territorialunit_id__in=district_ids).delete()
+        PollingStation.objects.filter(precinct_id__in=district_ids).update(
+            precinct_id=None
         )
-        for ed in eds:
-            ed.territorial_unit_id = resolve(ed.territorial_unit_id)
-        if eds:
-            ElectoralDistrict.objects.bulk_update(
-                eds, ["territorial_unit_id"], batch_size=2000
-            )
 
-        stations = list(
-            PollingStation.objects.filter(
-                territorial_unit_id__in=district_ids
-            ).only("id", "territorial_unit_id")
-        )
-        for st in stations:
-            st.territorial_unit_id = resolve(st.territorial_unit_id)
-        if stations:
-            PollingStation.objects.bulk_update(
-                stations, ["territorial_unit_id"], batch_size=1000
-            )
-
-        cands = list(
-            Candidate.objects.filter(
-                residence_municipality_id__in=district_ids
-            ).only("id", "residence_municipality_id")
-        )
-        for cand in cands:
-            cand.residence_municipality_id = resolve(cand.residence_municipality_id)
-        if cands:
-            Candidate.objects.bulk_update(
-                cands, ["residence_municipality_id"], batch_size=1000
-            )
-
-        PollingStation.served_units.through.objects.filter(
-            territorialunit_id__in=district_ids
-        ).delete()
-
-        deleted, _ = TerritorialUnit.objects.filter(
-            kind=TerritorialUnit.Kind.DISTRICT
-        ).delete()
+        deleted, _ = district_qs.delete()
         return deleted
 
     def _log(self, msg: str) -> None:
@@ -381,7 +315,7 @@ class Command(BaseCommand):
 
     def _ensure_offices(self) -> dict[str, Office]:
         out: dict[str, Office] = {}
-        for slug, name, desc, order, residence in OFFICES:
+        for slug, name, desc, order in OFFICES:
             office, _ = Office.objects.update_or_create(
                 slug=slug,
                 defaults={
@@ -389,7 +323,6 @@ class Command(BaseCommand):
                     "description": desc,
                     "is_open": True,
                     "display_order": order,
-                    "requires_local_residence": residence,
                 },
             )
             out[slug] = office
@@ -452,9 +385,13 @@ class Command(BaseCommand):
         return result
 
     def _bulk_upsert_districts(self, specs: list[dict]) -> None:
-        """specs: {slug, office_id, name, territorial_unit_id, seats_count, display_order}."""
+        """
+        specs: {slug, office_id, name, seats_count, display_order,
+                territorial_unit_id? | territorial_unit_ids?}
+        """
         if not specs:
             return
+        Through = ElectoralDistrict.territorial_units.through
         for i in range(0, len(specs), BATCH):
             chunk = specs[i : i + BATCH]
             slugs = [s["slug"] for s in chunk]
@@ -466,6 +403,7 @@ class Command(BaseCommand):
             to_update: list[ElectoralDistrict] = []
             for s in chunk:
                 seats = max(1, int(s.get("seats_count") or 1))
+                min_age = int(s.get("min_age") or 18)
                 cur = existing.get(s["slug"])
                 if cur is None:
                     to_create.append(
@@ -473,16 +411,16 @@ class Command(BaseCommand):
                             slug=s["slug"],
                             office_id=s["office_id"],
                             name=s["name"][:200],
-                            territorial_unit_id=s["territorial_unit_id"],
                             seats_count=seats,
+                            min_age=min_age,
                             display_order=int(s.get("display_order") or 0),
                         )
                     )
                 else:
                     cur.office_id = s["office_id"]
                     cur.name = s["name"][:200]
-                    cur.territorial_unit_id = s["territorial_unit_id"]
                     cur.seats_count = seats
+                    cur.min_age = min_age
                     cur.display_order = int(s.get("display_order") or 0)
                     to_update.append(cur)
             if to_create:
@@ -490,6 +428,32 @@ class Command(BaseCommand):
             if to_update:
                 ElectoralDistrict.objects.bulk_update(
                     to_update, DISTRICT_FIELDS, batch_size=BATCH
+                )
+
+            # Tymczasowe M2M (admin parent) — protokoły nadpiszą w _link_district_units.
+            by_slug = {
+                d.slug: d.pk
+                for d in ElectoralDistrict.objects.filter(slug__in=slugs).only(
+                    "id", "slug"
+                )
+            }
+            district_ids = list(by_slug.values())
+            Through.objects.filter(electoraldistrict_id__in=district_ids).delete()
+            m2m_rows = []
+            for s in chunk:
+                did = by_slug.get(s["slug"])
+                if not did:
+                    continue
+                unit_ids = s.get("territorial_unit_ids")
+                if unit_ids is None and s.get("territorial_unit_id"):
+                    unit_ids = [s["territorial_unit_id"]]
+                for uid in unit_ids or []:
+                    m2m_rows.append(
+                        Through(electoraldistrict_id=did, territorialunit_id=uid)
+                    )
+            if m2m_rows:
+                Through.objects.bulk_create(
+                    m2m_rows, batch_size=BATCH, ignore_conflicts=True
                 )
             if (i // BATCH) % 5 == 0:
                 self._log(f"  okręgi {min(i + BATCH, len(specs))}/{len(specs)}")
@@ -701,13 +665,63 @@ class Command(BaseCommand):
     def _import_stations(
         self, path, gminy: dict[str, TerritorialUnit]
     ) -> tuple[int, int]:
-        self._log("Import komisji wyborczych…")
+        """
+        Import komisji + odpowiadających obwodów (TerritorialUnit.PRECINCT).
+
+        Hierarchia: gmina → obwód ← komisja (PollingStation.precinct).
+        """
+        from django.utils.text import slugify
+
+        self._log("Import komisji wyborczych + obwodów…")
         existing = {
             s.code: s.id for s in PollingStation.objects.only("id", "code").iterator()
         }
+        existing_precincts = {
+            u.slug: u.id
+            for u in TerritorialUnit.objects.filter(
+                kind=TerritorialUnit.Kind.PRECINCT
+            ).only("id", "slug")
+        }
+
+        to_create_precincts: list[TerritorialUnit] = []
         to_create: list[PollingStation] = []
         to_update: list[PollingStation] = []
+        # (code, precinct_slug) — do ustawienia precinct_id po bulk_create
+        pending_precinct_slugs: dict[str, str] = {}
         created = updated = 0
+
+        def flush_precincts():
+            if not to_create_precincts:
+                return
+            TerritorialUnit.objects.bulk_create(to_create_precincts, batch_size=BATCH)
+            for u in to_create_precincts:
+                existing_precincts[u.slug] = None  # wypełnimy niżej
+            # Odśwież mapę slug→id
+            for slug, pk in TerritorialUnit.objects.filter(
+                slug__in=[u.slug for u in to_create_precincts]
+            ).values_list("slug", "id"):
+                existing_precincts[slug] = pk
+            to_create_precincts.clear()
+
+        def resolve_precinct(code: str, number: int | None, gmina: TerritorialUnit, streets: str) -> int | None:
+            slug = f"obwod-{slugify(code)}"
+            pid = existing_precincts.get(slug)
+            if pid:
+                return pid
+            if slug not in existing_precincts:
+                nr = f"nr {number}" if number is not None else ""
+                pname = f"Obwód {nr} — {gmina.name}".strip(" —")[:200]
+                to_create_precincts.append(
+                    TerritorialUnit(
+                        name=pname,
+                        slug=slug,
+                        kind=TerritorialUnit.Kind.PRECINCT,
+                        parent_id=gmina.pk,
+                    )
+                )
+                existing_precincts[slug] = None  # placeholder — po flush
+            pending_precinct_slugs[code] = slug
+            return None
 
         for row in iter_csv_rows_from_zip(path):
             teryt = norm_teryt(col(row, "TERYT gminy", "TERYT Gminy"))
@@ -725,13 +739,16 @@ class Command(BaseCommand):
             name = (col(row, "Siedziba") or f"Obwód nr {numer}")[:200]
             address = (col(row, "Pełna siedziba") or name)[:300]
             streets = col(row, "Opis granic")
+            precinct_id = resolve_precinct(code, number, gmina, streets)
             defaults = {
                 "name": name,
                 "number": number,
-                "territorial_unit_id": gmina.pk,
                 "address": address,
                 "streets_served": streets,
             }
+            if precinct_id:
+                defaults["precinct_id"] = precinct_id
+
             pk = existing.get(code)
             if pk is None:
                 to_create.append(PollingStation(code=code, **defaults))
@@ -740,29 +757,49 @@ class Command(BaseCommand):
                 to_update.append(PollingStation(pk=pk, code=code, **defaults))
                 updated += 1
 
+            if len(to_create_precincts) >= BATCH:
+                flush_precincts()
             if len(to_create) >= BATCH:
+                flush_precincts()
+                # Uzupełnij precinct_id przed create
+                for st in to_create:
+                    if not getattr(st, "precinct_id", None):
+                        slug = pending_precinct_slugs.get(st.code)
+                        if slug and existing_precincts.get(slug):
+                            st.precinct_id = existing_precincts[slug]
                 PollingStation.objects.bulk_create(to_create, batch_size=BATCH)
                 to_create.clear()
             if len(to_update) >= BATCH:
+                flush_precincts()
+                for st in to_update:
+                    if not getattr(st, "precinct_id", None):
+                        slug = pending_precinct_slugs.get(st.code)
+                        if slug and existing_precincts.get(slug):
+                            st.precinct_id = existing_precincts[slug]
                 PollingStation.objects.bulk_update(
                     to_update,
-                    [
-                        "name",
-                        "number",
-                        "territorial_unit_id",
-                        "address",
-                        "streets_served",
-                    ],
+                    ["name", "number", "precinct_id", "address", "streets_served"],
                     batch_size=BATCH,
                 )
                 to_update.clear()
 
+        flush_precincts()
+        for st in to_create:
+            if not getattr(st, "precinct_id", None):
+                slug = pending_precinct_slugs.get(st.code)
+                if slug and existing_precincts.get(slug):
+                    st.precinct_id = existing_precincts[slug]
+        for st in to_update:
+            if not getattr(st, "precinct_id", None):
+                slug = pending_precinct_slugs.get(st.code)
+                if slug and existing_precincts.get(slug):
+                    st.precinct_id = existing_precincts[slug]
         if to_create:
             PollingStation.objects.bulk_create(to_create, batch_size=BATCH)
         if to_update:
             PollingStation.objects.bulk_update(
                 to_update,
-                ["name", "number", "territorial_unit_id", "address", "streets_served"],
+                ["name", "number", "precinct_id", "address", "streets_served"],
                 batch_size=BATCH,
             )
         return created, updated

@@ -227,8 +227,12 @@ class Command(BaseCommand):
             user.set_password("demo1234")
             user.save()
 
-        # Preferuj prawdziwą komisję PKW Katowice, jeśli jest po imporcie.
-        pkw = PollingStation.objects.filter(code="246901-1").first()
+        # Preferuj komisję PKW Katowice tylko jeśli ma już przypisany obwód.
+        pkw = (
+            PollingStation.objects
+            .filter(code="246901-1", precinct__isnull=False)
+            .first()
+        )
         effective_station = pkw or station
         effective_precinct = effective_station.precinct or precinct_ktw
 

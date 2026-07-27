@@ -39,10 +39,8 @@ BASE_DIR = Path(__file__).resolve().parents[4]
 DEFAULT_CSV = BASE_DIR / "data" / "pkw" / "katowice_obwody.csv"
 
 
-def _ensure_katowice_units() -> tuple[TerritorialUnit, list[TerritorialUnit]]:
-    """
-    Lokalizacja siedziby (gmina) + jednostki administracyjne na mapie.
-    """
+def _ensure_katowice_units() -> TerritorialUnit:
+    """Gmina Katowice (parent obwodów)."""
     poland, _ = TerritorialUnit.objects.get_or_create(
         slug="polska",
         defaults={
@@ -71,10 +69,27 @@ def _ensure_katowice_units() -> tuple[TerritorialUnit, list[TerritorialUnit]]:
             "parent": slask,
             "center_lat": "50.264900",
             "center_lng": "19.023800",
+            "teryt": CITY_FILTERS["katowice"]["teryt"],
         },
     )
-    served = [poland, slask, gmina]
-    return gmina, served
+    return gmina
+
+
+def _ensure_precinct(code: str, number: int | None, gmina: TerritorialUnit, streets: str = "") -> TerritorialUnit:
+    from django.utils.text import slugify
+
+    slug = f"obwod-{slugify(code)}"
+    nr = f"nr {number}" if number is not None else ""
+    name = f"Obwód {nr} — {gmina.name}".strip(" —")[:200]
+    precinct, _ = TerritorialUnit.objects.update_or_create(
+        slug=slug,
+        defaults={
+            "name": name,
+            "kind": TerritorialUnit.Kind.PRECINCT,
+            "parent": gmina,
+        },
+    )
+    return precinct
 
 
 def _station_code(teryt: str, numer: str) -> str:
@@ -221,7 +236,7 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING("Dry-run — bez zapisu."))
             return
 
-        location, served_units = _ensure_katowice_units()
+        gmina = _ensure_katowice_units()
         created = updated = 0
         for row in rows:
             teryt = row.get("teryt") or filt["teryt"]
@@ -236,17 +251,17 @@ class Command(BaseCommand):
             except ValueError:
                 number = None
             streets = (row.get("opis_granic") or "").strip()
+            precinct = _ensure_precinct(code, number, gmina, streets)
             station, was_created = PollingStation.objects.update_or_create(
                 code=code,
                 defaults={
                     "name": name,
                     "number": number,
-                    "territorial_unit": location,
+                    "precinct": precinct,
                     "address": address or f"Katowice, obwód {numer}",
                     "streets_served": streets,
                 },
             )
-            station.served_units.set(served_units)
             if was_created:
                 created += 1
             else:
@@ -255,6 +270,6 @@ class Command(BaseCommand):
         self.stdout.write(
             self.style.SUCCESS(
                 f"OK: utworzono {created}, zaktualizowano {updated}. "
-                f"Lokalizacja: {location}; obsługiwane jednostki: {len(served_units)}."
+                f"Gmina: {gmina}."
             )
         )

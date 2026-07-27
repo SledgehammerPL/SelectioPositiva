@@ -146,8 +146,9 @@ def dashboard(request: HttpRequest) -> HttpResponse:
     map_payload: dict = {"station": None, "units": []}
     if profile is not None and profile.polling_station_id:
         station = profile.polling_station
-        precinct = station.precinct
-        ancestors = precinct.get_ancestors(include_self=True)
+        # Preferuj obwód komisji; fallback: territorial_unit profilu.
+        unit = station.precinct or profile.territorial_unit
+        ancestors = unit.get_ancestors(include_self=True) if unit is not None else []
         map_payload = {
             "station": {
                 "name": station.name,
