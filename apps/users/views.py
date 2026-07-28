@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.mail import send_mail
@@ -294,11 +296,19 @@ def register(request: HttpRequest) -> HttpResponse:
                 recipient_list=[user.email],
                 fail_silently=False,
             )
-        except Exception:
+        except Exception as exc:
+            logging.getLogger("apps").exception(
+                "Registration email failed (from=%s to=%s): %s",
+                settings.DEFAULT_FROM_EMAIL,
+                user.email,
+                exc,
+            )
             user.delete()
+            detail = f" ({exc})" if settings.DEBUG else ""
             messages.error(
                 request,
-                "Nie udało się wysłać emaila aktywacyjnego. Spróbuj ponownie później.",
+                "Nie udało się wysłać emaila aktywacyjnego."
+                f"{detail} Sprawdź DEFAULT_FROM_EMAIL / Postfix.",
             )
             return render(request, "registration/register.html", {"form": form})
         messages.success(
