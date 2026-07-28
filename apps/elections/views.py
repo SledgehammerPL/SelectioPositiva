@@ -6,14 +6,22 @@ from django.contrib import messages
 from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.views import LoginView, LogoutView
-from django.db.models import Q
 from django.http import HttpRequest, HttpResponse, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
+from django.utils.decorators import method_decorator
+from django.views.decorators.cache import never_cache
+from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from elections.forms import CandidateRequestForm
-from elections.models import Ballot, CandidateRequest, ElectoralDistrict, VoterProfile
+from elections.models import (
+    Ballot,
+    CandidateRequest,
+    ElectoralDistrict,
+    _ancestor_of_kind,
+    unit_is_descendant_of_any,
+)
 from elections.services import (
     ballot_counts_for_user,
     get_cached_result,
@@ -22,7 +30,12 @@ from elections.services import (
     user_can_vote_on,
     vote_statuses_for_user,
 )
-from elections.services.eligibility import get_eligible_districts, user_age_on, user_may_run_in_district
+from elections.services.eligibility import (
+    district_units_at_level,
+    get_eligible_districts,
+    user_age_on,
+    user_may_run_in_district,
+)
 from geo.models import TerritorialUnit
 from users.forms import EmailAuthenticationForm
 
@@ -31,6 +44,8 @@ User = get_user_model()
 MIN_SEARCH_CHARS = 3
 
 
+@method_decorator(never_cache, name="dispatch")
+@method_decorator(ensure_csrf_cookie, name="dispatch")
 class ElectionLoginView(LoginView):
     template_name = "registration/login.html"
     redirect_authenticated_user = True
@@ -66,7 +81,9 @@ def _user_payload(user) -> dict:
 def _search_users_for_district(
     district: ElectoralDistrict,
     *,
-    q: str = "",
+    first_name: str = "",
+    second_name: str = "",
+    last_name: str = "",
     birth_date: str = "",
     exclude_ids: list[int] | None = None,
     limit: int = 40,
@@ -74,26 +91,53 @@ def _search_users_for_district(
 ) -> list:
     """
     Autocomplete: wyszukuje użytkowników uprawnionych do kandydowania w okręgu.
-    Wymaga min. 3 znaków imienia/nazwiska LUB daty urodzenia.
+
+    Wystarczy JEDNO wypełnione pole (min. 3 znaki) albo data urodzenia.
+    Kolejne pola zawężają wynik (AND).
     """
-    query = q.strip()
+    first = first_name.strip()
+    second = second_name.strip()
+    last = last_name.strip()
     birth = birth_date.strip()
-    if len(query) < MIN_SEARCH_CHARS and not birth:
+    has_name_filter = (
+        len(first) >= MIN_SEARCH_CHARS
+        or len(second) >= MIN_SEARCH_CHARS
+        or len(last) >= MIN_SEARCH_CHARS
+    )
+    if not has_name_filter and not birth:
         return []
 
     ref = today or date.today()
+    office = district.office
+    level = office.candidacy_level if office is not None else None
+    min_age = office.min_age if office is not None else 0
+    # Poziom krajowy: każdy z jednostką może kandydować — bez per-user tree walk.
+    country_wide = bool(level and level.slug == "country")
+    allowed_at_level: set[int] | None = None
+    if not country_wide:
+        if level is not None:
+            allowed_at_level = district_units_at_level(district, level.slug)
+        else:
+            allowed_at_level = set(
+                district.territorial_units.values_list("pk", flat=True)
+            )
+        if not allowed_at_level:
+            return []
 
-    # Kandydaci: profil z dowolną jednostką (obwód lub np. gmina urodzenia).
-    eligible_user_ids = list(
-        VoterProfile.objects.filter(territorial_unit__isnull=False).values_list(
-            "user_id", flat=True
+    qs = (
+        User.objects.filter(
+            is_active=True,
+            voter_profile__territorial_unit__isnull=False,
+        )
+        .select_related(
+            "voter_profile",
+            "voter_profile__territorial_unit",
+            "voter_profile__territorial_unit__parent",
+            "voter_profile__territorial_unit__parent__parent",
+            "voter_profile__territorial_unit__parent__parent__parent",
+            "voter_profile__territorial_unit__parent__parent__parent__parent",
         )
     )
-
-    qs = User.objects.filter(
-        pk__in=eligible_user_ids,
-        is_active=True,
-    ).select_related("voter_profile", "voter_profile__territorial_unit")
 
     if birth:
         try:
@@ -101,30 +145,39 @@ def _search_users_for_district(
         except ValueError:
             return []
 
-    if len(query) >= MIN_SEARCH_CHARS:
-        qs = qs.filter(
-            Q(first_name__istartswith=query)
-            | Q(last_name__istartswith=query)
-            | Q(email__istartswith=query)
-        )
+    if len(first) >= MIN_SEARCH_CHARS:
+        qs = qs.filter(first_name__istartswith=first)
+    if len(second) >= MIN_SEARCH_CHARS:
+        qs = qs.filter(voter_profile__second_name__istartswith=second)
+    if len(last) >= MIN_SEARCH_CHARS:
+        qs = qs.filter(last_name__istartswith=last)
 
     if exclude_ids:
         qs = qs.exclude(pk__in=exclude_ids)
 
     qs = qs.order_by("last_name", "first_name", "pk")
 
-    # Filtr terytorialny kandydatury (office.candidacy_level) + wiek (office.min_age)
-    min_age = district.office.min_age if district.office_id else 0
-
     matched = []
-    for user in qs[:300]:
+    # Nadmiarowy bufor gdy część odpadnie na wieku / terytorium.
+    scan_cap = limit if country_wide else max(limit * 25, 200)
+    for user in qs[:scan_cap]:
         try:
             profile = user.voter_profile
         except Exception:
             continue
-        precinct = profile.territorial_unit
-        if not user_may_run_in_district(precinct, district):
+        unit = profile.territorial_unit
+        if unit is None:
             continue
+
+        if not country_wide:
+            assert allowed_at_level is not None
+            if level is not None:
+                candidate_unit = _ancestor_of_kind(unit, level.slug)
+                if candidate_unit is None or candidate_unit.pk not in allowed_at_level:
+                    continue
+            elif not unit_is_descendant_of_any(unit, allowed_at_level):
+                continue
+
         if min_age:
             age = user_age_on(user, ref)
             if age is not None and age < min_age:
@@ -373,7 +426,9 @@ def vote_candidate_search(request: HttpRequest, slug: str) -> JsonResponse:
     if not user_can_vote_on(request.user, district):
         return JsonResponse({"error": "forbidden"}, status=403)
 
-    q = request.GET.get("q", "").strip()
+    first = request.GET.get("first_name", "").strip()
+    second = request.GET.get("second_name", "").strip()
+    last = request.GET.get("last_name", "").strip()
     birth = request.GET.get("birth_date", "").strip()
     exclude_raw = request.GET.get("exclude", "")
     exclude_ids: list[int] = []
@@ -382,11 +437,22 @@ def vote_candidate_search(request: HttpRequest, slug: str) -> JsonResponse:
         if part.isdigit():
             exclude_ids.append(int(part))
 
-    if len(q) < MIN_SEARCH_CHARS and not birth:
+    has_name = (
+        len(first) >= MIN_SEARCH_CHARS
+        or len(second) >= MIN_SEARCH_CHARS
+        or len(last) >= MIN_SEARCH_CHARS
+    )
+    if not has_name and not birth:
         return JsonResponse({"active": False, "results": []})
 
     found = _search_users_for_district(
-        district, q=q, birth_date=birth, exclude_ids=exclude_ids, limit=40
+        district,
+        first_name=first,
+        second_name=second,
+        last_name=last,
+        birth_date=birth,
+        exclude_ids=exclude_ids,
+        limit=40,
     )
     return JsonResponse(
         {
