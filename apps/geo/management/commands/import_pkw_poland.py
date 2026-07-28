@@ -45,8 +45,8 @@ OFFICES = [
     ),
     (
         "radny-powiatu",
-        "Radny rady powiatu",
-        "Okręgi do rad powiatów (PKW samorząd 2024).",
+        "Radny rady powiatu / dzielnicy",
+        "Okręgi do rad powiatów i rad dzielnic m.st. Warszawy (PKW samorząd 2024).",
         40,
         18,
         "county",
@@ -174,6 +174,15 @@ class Command(BaseCommand):
             slug_fn=lambda key, nr: f"rada-powiat-{key}-{nr}",
             key_from_row=lambda row: norm_teryt(col(row, "TERYT Powiatu"), 6)[:4],
         )
+        # Dzielnice Warszawy = jak powiaty (ten sam urząd), klucz TERYT 6 cyfr.
+        rada_dzielnic = self._import_keyed_okregi(
+            paths["okregi_rada_dzielnic"],
+            office=offices["radny-powiatu"],
+            parents=admin["gmina"],
+            slug_fn=lambda key, nr: f"rada-powiat-{key}-{nr}",
+            key_from_row=lambda row: norm_teryt(col(row, "TERYT Dzielnicy"), 6),
+        )
+        rada_powiat.update(rada_dzielnic)
         rada_gminy = self._import_keyed_okregi(
             paths["okregi_rada_gminy"],
             office=offices["radny-gminy"],

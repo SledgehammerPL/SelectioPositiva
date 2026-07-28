@@ -92,7 +92,8 @@ def _district_maps() -> dict:
         elif slug.startswith("rada-powiat-"):
             rest = slug[len("rada-powiat-") :]
             key, _, nr = rest.partition("-")
-            if len(key) == 4 and nr:
+            # powiat: 4 cyfry; dzielnica Warszawy: 6 cyfr
+            if nr and len(key) in (4, 6) and key.isdigit():
                 rada_powiat[(key, nr)] = pk
         elif slug.startswith("rada-gminy-"):
             rest = slug[len("rada-gminy-") :]
@@ -154,6 +155,14 @@ def build_district_unit_links(
         teryt_keys=("Teryt Gminy", "TERYT Gminy"),
         okreg_keys=("Nr okręgu",),
     )
+    if "prot_rada_dzielnic" in paths:
+        rada_powiat_station.update(
+            _protocol_station_map(
+                paths["prot_rada_dzielnic"],
+                teryt_keys=("Teryt Gminy", "TERYT Gminy"),
+                okreg_keys=("Nr okręgu",),
+            )
+        )
     rada_gminy_station: dict[tuple[str, str], str] = {}
     rada_gminy_station.update(
         _protocol_station_map(
@@ -202,9 +211,12 @@ def build_district_unit_links(
         if did and gid:
             links[did].add(gid)
 
-    # ── Rada powiatu: obwody ─────────────────────────────────────────────────
+    # ── Rada powiatu / dzielnicy: obwody ─────────────────────────────────────
     for (teryt, nr), okreg in rada_powiat_station.items():
-        did = maps["rada_powiat"].get((teryt[:4], okreg))
+        # dzielnica: pełny TERYT gminy (6); powiat: pierwsze 4
+        did = maps["rada_powiat"].get((teryt, okreg)) or maps["rada_powiat"].get(
+            (teryt[:4], okreg)
+        )
         if not did:
             continue
         pid = precinct_by_code.get(f"{teryt}-{nr}")
@@ -240,9 +252,9 @@ def build_district_unit_links(
                 fallback += 1
     for (key, nr), did in maps["rada_powiat"].items():
         if did not in links:
-            pid = admin["powiat"].get(key)
-            if pid:
-                links[did].add(pid)
+            unit_id = admin["powiat"].get(key) or admin["gmina"].get(key)
+            if unit_id:
+                links[did].add(unit_id)
                 fallback += 1
     for (key, nr), did in maps["rada_gminy"].items():
         if did not in links:

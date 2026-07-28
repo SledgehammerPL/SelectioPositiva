@@ -8,6 +8,10 @@ from django.contrib.auth import get_user_model
 from django.db import transaction
 
 from elections.models import VoterProfile
+from elections.services.identity import (
+    build_identity_index,
+    find_identity_match,
+)
 
 User = get_user_model()
 
@@ -25,11 +29,22 @@ def ensure_user(
     is_staff: bool = False,
 ) -> User:
     """
-    Znajduje użytkownika po emailu albo tworzy nowego.
+    Znajduje użytkownika po emailu, potem po tożsamości
+    (imię + miasto + data ur.), albo tworzy nowego.
     `User.username` jest wewnętrzne (`u{id}`) — logowanie po email.
     """
     normalized = email.strip().lower()
     user = User.objects.filter(email__iexact=normalized).first()
+    if user is None and territorial_unit is not None:
+        index = build_identity_index()
+        user = find_identity_match(
+            index,
+            first_name=first_name,
+            second_name=second_name,
+            last_name=last_name,
+            territorial_unit_id=territorial_unit.pk,
+            birth_date=birth_date,
+        )
     if user is not None:
         changed = False
         if first_name and user.first_name != first_name:

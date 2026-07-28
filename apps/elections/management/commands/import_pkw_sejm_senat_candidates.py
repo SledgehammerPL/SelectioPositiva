@@ -172,7 +172,7 @@ class Command(BaseCommand):
         else:
             self.stdout.write(f"Okręgi {district_prefix}*: {district_count}")
 
-        created, updated, missing_units = import_candidates_batch(
+        created, updated, reused, missing_units = import_candidates_batch(
             candidates,
             email_prefix=f"{chamber}{ELECTION_YEAR}.",
             email_for=_email_for,
@@ -190,6 +190,7 @@ class Command(BaseCommand):
 
         self.stdout.write(
             self.style.SUCCESS(
-                f"{chamber.upper()}: utworzone {created}, zaktualizowane {updated}."
+                f"{chamber.upper()}: utworzone {created}, "
+                f"zaktualizowane {updated}, po tożsamości {reused}."
             )
         )

@@ -18,6 +18,7 @@ SOURCES = {
     "okregi_sejmik": "dane/2024/samorzad/okregi_sejmiki_wojewodztw_csv.zip",
     "okregi_rada_powiatu": "dane/2024/samorzad/okregi_rady_powiatow_csv.zip",
     "okregi_rada_gminy": "dane/2024/samorzad/okregi_rady_gmin_csv.zip",
+    "okregi_rada_dzielnic": "dane/2024/samorzad/okregi_rady_dzielnic_csv.zip",
     "okregi_wbp": "dane/2024/samorzad/okregi_wojt_burmistrz_prezydent_csv.zip",
     "prot_sejm": "dane/2023/sejmsenat/protokoly_po_obwodach_sejm_csv.zip",
     "prot_senat": "dane/2023/sejmsenat/protokoly_po_obwodach_senat_csv.zip",
@@ -25,9 +26,16 @@ SOURCES = {
     "prot_rada_powiatu": "dane/2024/samorzad/protokoly_po_obwodach_rada_powiatu_csv.zip",
     "prot_rada_gminy_gt20": "dane/2024/samorzad/protokoly_po_obwodach_rady_gmin_powyzej_20k_csv.zip",
     "prot_rada_gminy_lt20": "dane/2024/samorzad/protokoly_po_obwodach_rady_gmin_do_20k_csv.zip",
+    "prot_rada_dzielnic": "dane/2024/samorzad/protokoly_po_obwodach_rada_dzielnicy_csv.zip",
     "kandydaci_euro": "dane/2024/parlament_eu/kandydaci_csv.zip",
     "kandydaci_sejm": "dane/2023/sejmsenat/kandydaci_sejm_csv.zip",
     "kandydaci_senat": "dane/2023/sejmsenat/kandydaci_senat_csv.zip",
+    "kandydaci_sejmik": "dane/2024/samorzad/kandydaci_sejmiki_wojewodztw_csv.zip",
+    "kandydaci_rada_powiatu": "dane/2024/samorzad/kandydaci_rady_powiatow_csv.zip",
+    "kandydaci_rada_dzielnic": "dane/2024/samorzad/kandydaci_rady_dzielnic_csv.zip",
+    "kandydaci_rada_gminy_gt20": "dane/2024/samorzad/kandydaci_rady_gmin_powyzej_20k_csv.zip",
+    "kandydaci_rada_gminy_lt20": "dane/2024/samorzad/kandydaci_rady_gmin_do_20k_xlsx.zip",
+    "kandydaci_wbp": "dane/2024/samorzad/kandydaci_wbp_csv.zip",
 }
 
 
@@ -71,6 +79,35 @@ def iter_csv_rows_from_zip(path: Path) -> Iterator[dict[str, str]]:
                     for k, v in row.items()
                     if k is not None
                 }
+
+
+def iter_xlsx_rows_from_zip(path: Path) -> Iterator[dict[str, str]]:
+    """Pierwszy arkusz z XLSX w ZIP (np. kandydaci gmin do 20k)."""
+    import openpyxl
+
+    with zipfile.ZipFile(path) as zf:
+        names = [n for n in zf.namelist() if n.lower().endswith(".xlsx")]
+        if not names:
+            return
+        raw = zf.read(names[0])
+    wb = openpyxl.load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
+    try:
+        ws = wb.active
+        rows = ws.iter_rows(values_only=True)
+        header_row = next(rows, None)
+        if not header_row:
+            return
+        headers = [(str(h).strip() if h is not None else "") for h in header_row]
+        for values in rows:
+            if values is None or all(v is None or str(v).strip() == "" for v in values):
+                continue
+            yield {
+                headers[i]: ("" if values[i] is None else str(values[i]).strip())
+                for i in range(len(headers))
+                if headers[i]
+            }
+    finally:
+        wb.close()
 
 
 def col(row: dict[str, str], *names: str) -> str:
