@@ -188,7 +188,7 @@
         pool.hidden = !open;
         setExpanded(open);
         if (!filterActive()) {
-          setStatus("Podaj imię, nazwisko (min. 3 znaki) lub datę urodzenia.");
+          setStatus("Wpisz min. 3 znaki w dowolnym polu (albo datę) — kolejne pola zawężają.");
           return;
         }
         if (visible === 0) {
@@ -227,7 +227,7 @@
           pool.hidden = true;
           setExpanded(false);
           activeIndex = -1;
-          setStatus("Podaj imię, nazwisko (min. 3 znaki) lub datę urodzenia.");
+          setStatus("Wpisz min. 3 znaki w dowolnym polu (albo datę) — kolejne pola zawężają.");
           return;
         }
 
@@ -255,7 +255,7 @@
               pool.innerHTML = "";
               pool.hidden = true;
               setExpanded(false);
-              setStatus("Podaj imię, nazwisko (min. 3 znaki) lub datę urodzenia.");
+              setStatus("Wpisz min. 3 znaki w dowolnym polu (albo datę) — kolejne pola zawężają.");
               return;
             }
             renderResults(data.results || []);
@@ -354,7 +354,7 @@
       syncEmpty();
       pool.hidden = true;
       setExpanded(false);
-      setStatus("Podaj imię, nazwisko (min. 3 znaki) lub datę urodzenia.");
+      setStatus("Wpisz min. 3 znaki w dowolnym polu (albo datę) — kolejne pola zawężają.");
       return { addCandidate };
     },
   };
