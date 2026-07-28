@@ -9,6 +9,7 @@ urlpatterns = [
         views.verify_email,
         name="verify_email",
     ),
+    path("settings/profile/", views.profile, name="profile"),
     path("settings/station/", views.change_station, name="change_station"),
     path(
         "settings/station/children/",

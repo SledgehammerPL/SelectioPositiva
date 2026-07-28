@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+
+{% block title %}Profil — Selectio Positiva{% endblock %}
+
+{% block content %}
+<section class="settings-panel profile-panel">
+  <p class="eyebrow"><a href="{% url 'dashboard' %}">← Panel</a></p>
+  <h1>Profil</h1>
+  <p class="lede">
+    Email konta: <strong>{{ user.email }}</strong>.
+    Uzupełnij dane osobowe i ewentualnie zmień hasło.
+  </p>
+
+  <div class="profile-grid">
+    <section class="profile-card">
+      <h2>Dane osobowe</h2>
+      <form method="post" class="auth-form profile-form" novalidate>
+        {% csrf_token %}
+        <input type="hidden" name="action" value="profile">
+        {% if data_form.non_field_errors %}
+        <div class="flash flash-error">{{ data_form.non_field_errors }}</div>
+        {% endif %}
+        <label class="field">
+          <span>Pierwsze imię</span>
+          {{ data_form.first_name }}
+          {% if data_form.first_name.errors %}
+          <span class="field-error">{{ data_form.first_name.errors.0 }}</span>
+          {% endif %}
+        </label>
+        <label class="field">
+          <span>Drugie imię</span>
+          {{ data_form.second_name }}
+          {% if data_form.second_name.errors %}
+          <span class="field-error">{{ data_form.second_name.errors.0 }}</span>
+          {% endif %}
+        </label>
+        <label class="field">
+          <span>Nazwisko</span>
+          {{ data_form.last_name }}
+          {% if data_form.last_name.errors %}
+          <span class="field-error">{{ data_form.last_name.errors.0 }}</span>
+          {% endif %}
+        </label>
+        <label class="field">
+          <span>Data urodzenia</span>
+          {{ data_form.birth_date }}
+          {% if data_form.birth_date.errors %}
+          <span class="field-error">{{ data_form.birth_date.errors.0 }}</span>
+          {% endif %}
+        </label>
+        <button type="submit" class="btn btn-primary">Zapisz dane</button>
+      </form>
+    </section>
+
+    <section class="profile-card">
+      <h2>Zmiana hasła</h2>
+      <form method="post" class="auth-form profile-form" novalidate>
+        {% csrf_token %}
+        <input type="hidden" name="action" value="password">
+        {% if password_form.non_field_errors %}
+        <div class="flash flash-error">{{ password_form.non_field_errors }}</div>
+        {% endif %}
+        <label class="field">
+          <span>{{ password_form.old_password.label }}</span>
+          {{ password_form.old_password }}
+          {% if password_form.old_password.errors %}
+          <span class="field-error">{{ password_form.old_password.errors.0 }}</span>
+          {% endif %}
+        </label>
+        <label class="field">
+          <span>{{ password_form.new_password1.label }}</span>
+          {{ password_form.new_password1 }}
+          {% if password_form.new_password1.errors %}
+          <span class="field-error">{{ password_form.new_password1.errors.0 }}</span>
+          {% endif %}
+        </label>
+        <label class="field">
+          <span>{{ password_form.new_password2.label }}</span>
+          {{ password_form.new_password2 }}
+          {% if password_form.new_password2.errors %}
+          <span class="field-error">{{ password_form.new_password2.errors.0 }}</span>
+          {% endif %}
+        </label>
+        <button type="submit" class="btn btn-secondary">Zmień hasło</button>
+      </form>
+    </section>
+  </div>
+</section>
+{% endblock %}

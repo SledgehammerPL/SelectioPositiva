@@ -274,11 +274,7 @@ def register(request: HttpRequest) -> HttpResponse:
     if request.method == "POST" and form.is_valid():
         user = register_user(
             email=form.cleaned_data["email"],
-            birth_date=form.cleaned_data["birth_date"],
             password=form.cleaned_data["password1"],
-            first_name=form.cleaned_data["first_name"],
-            second_name=form.cleaned_data.get("second_name") or "",
-            last_name=form.cleaned_data["last_name"],
         )
         uid = make_email_uid(user)
         token = email_verification_token.make_token(user)
@@ -324,3 +320,41 @@ def verify_email(request: HttpRequest, uidb64: str, token: str) -> HttpResponse:
         return redirect("login")
     messages.success(request, "Email potwierdzony. Możesz się zalogować.")
     return redirect("login")
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def profile(request: HttpRequest) -> HttpResponse:
+    from django.contrib.auth import update_session_auth_hash
+
+    from users.forms import ProfileDataForm, ProfilePasswordChangeForm
+
+    profile_obj = get_voter_profile(request.user)
+    data_form = ProfileDataForm(request.user)
+    password_form = ProfilePasswordChangeForm(user=request.user)
+
+    if request.method == "POST":
+        action = request.POST.get("action", "profile")
+        if action == "password":
+            password_form = ProfilePasswordChangeForm(user=request.user, data=request.POST)
+            if password_form.is_valid():
+                password_form.save()
+                update_session_auth_hash(request, password_form.user)
+                messages.success(request, "Hasło zostało zmienione.")
+                return redirect("profile")
+        else:
+            data_form = ProfileDataForm(request.user, request.POST)
+            if data_form.is_valid():
+                data_form.save()
+                messages.success(request, "Zapisano dane profilu.")
+                return redirect("profile")
+
+    return render(
+        request,
+        "users/profile.html",
+        {
+            "profile": profile_obj,
+            "data_form": data_form,
+            "password_form": password_form,
+        },
+    )

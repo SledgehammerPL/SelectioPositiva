@@ -6,7 +6,7 @@
 <section class="auth-panel">
   <p class="eyebrow">Nowe konto</p>
   <h1 class="auth-brand">Selectio <em>Positiva</em></h1>
-  <p class="lede">Podaj imiona, nazwisko, email i datę urodzenia. Wyślemy link aktywacyjny na podany adres.</p>
+  <p class="lede">Podaj email i hasło. Wyślemy link aktywacyjny na podany adres. Dane osobowe uzupełnisz później w profilu.</p>
 
   <form method="post" class="auth-form" novalidate>
     {% csrf_token %}
@@ -14,38 +14,10 @@
     <div class="flash flash-error">{{ form.non_field_errors }}</div>
     {% endif %}
     <label class="field">
-      <span>Pierwsze imię</span>
-      {{ form.first_name }}
-      {% if form.first_name.errors %}
-      <span class="field-error">{{ form.first_name.errors.0 }}</span>
-      {% endif %}
-    </label>
-    <label class="field">
-      <span>Drugie imię</span>
-      {{ form.second_name }}
-      {% if form.second_name.errors %}
-      <span class="field-error">{{ form.second_name.errors.0 }}</span>
-      {% endif %}
-    </label>
-    <label class="field">
-      <span>Nazwisko</span>
-      {{ form.last_name }}
-      {% if form.last_name.errors %}
-      <span class="field-error">{{ form.last_name.errors.0 }}</span>
-      {% endif %}
-    </label>
-    <label class="field">
       <span>Email</span>
       {{ form.email }}
       {% if form.email.errors %}
       <span class="field-error">{{ form.email.errors.0 }}</span>
-      {% endif %}
-    </label>
-    <label class="field">
-      <span>Data urodzenia</span>
-      {{ form.birth_date }}
-      {% if form.birth_date.errors %}
-      <span class="field-error">{{ form.birth_date.errors.0 }}</span>
       {% endif %}
     </label>
     <label class="field">

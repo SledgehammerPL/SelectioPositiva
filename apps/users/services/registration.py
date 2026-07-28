@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import date
-
 from django.contrib.auth import get_user_model
 from django.contrib.auth.tokens import PasswordResetTokenGenerator
 from django.db import transaction
@@ -35,22 +33,12 @@ def parse_email_uid(uidb64: str) -> int | None:
 
 
 @transaction.atomic
-def register_user(
-    *,
-    email: str,
-    birth_date: date,
-    password: str,
-    first_name: str,
-    last_name: str,
-    second_name: str = "",
-) -> User:
-    """Tworzy nieaktywne konto + profil (imiona, nazwisko, data urodzenia)."""
+def register_user(*, email: str, password: str) -> User:
+    """Tworzy nieaktywne konto (email + hasło) i pusty profil wyborcy."""
     normalized = email.strip().lower()
     user = User(
         username=f"_tmp_{normalized[:20]}",
         email=normalized,
-        first_name=first_name.strip(),
-        last_name=last_name.strip(),
         is_active=False,
     )
     user.set_password(password)
@@ -58,12 +46,7 @@ def register_user(
     user.username = f"u{user.pk}"
     user.save(update_fields=["username"])
 
-    VoterProfile.objects.create(
-        user=user,
-        second_name=(second_name or "").strip(),
-        birth_date=birth_date,
-        territorial_unit=None,
-    )
+    VoterProfile.objects.create(user=user)
     return user
 
 

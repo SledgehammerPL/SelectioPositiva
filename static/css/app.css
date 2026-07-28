@@ -1078,6 +1078,39 @@ h2 {
   animation: rise 0.4s ease both;
 }
 
+.profile-panel {
+  width: min(920px, 100%);
+}
+
+.profile-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.25rem;
+  margin-top: 1.5rem;
+}
+
+.profile-card {
+  padding: 1.25rem 1.35rem 1.4rem;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.profile-card h2 {
+  font-size: 1.2rem;
+  margin: 0 0 0.85rem;
+}
+
+.profile-form {
+  margin-top: 0;
+}
+
+@media (max-width: 760px) {
+  .profile-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .station-form {
   display: grid;
   gap: 1rem;
