@@ -26,6 +26,8 @@ SOURCES = {
     "prot_rada_gminy_gt20": "dane/2024/samorzad/protokoly_po_obwodach_rady_gmin_powyzej_20k_csv.zip",
     "prot_rada_gminy_lt20": "dane/2024/samorzad/protokoly_po_obwodach_rady_gmin_do_20k_csv.zip",
     "kandydaci_euro": "dane/2024/parlament_eu/kandydaci_csv.zip",
+    "kandydaci_sejm": "dane/2023/sejmsenat/kandydaci_sejm_csv.zip",
+    "kandydaci_senat": "dane/2023/sejmsenat/kandydaci_senat_csv.zip",
 }
 
 
