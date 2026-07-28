@@ -546,25 +546,30 @@ h2 {
 }
 
 .ac-filters {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0.65rem;
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 0.45rem;
   align-items: end;
 }
 
 .ac-field {
   display: grid;
-  gap: 0.3rem;
+  gap: 0.2rem;
   min-width: 0;
+  flex: 1 1 0;
 }
 
 .ac-field > span {
-  font-size: 0.82rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
   color: var(--ink-soft);
 }
 
 .ac-field-birth {
-  max-width: 11rem;
+  flex: 0 0 8.5rem;
+  max-width: 8.5rem;
 }
 
 .ac-row {
@@ -586,10 +591,10 @@ h2 {
 .ac-input {
   width: 100%;
   border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 0.85rem 1rem;
+  border-radius: 10px;
+  padding: 0.5rem 0.65rem;
   font: inherit;
-  font-size: 1.05rem;
+  font-size: 0.95rem;
   color: var(--ink);
   background: #fff;
   outline: none;
@@ -763,10 +768,15 @@ h2 {
 
 @media (max-width: 900px) {
   .ac-filters {
-    grid-template-columns: 1fr 1fr;
+    flex-wrap: wrap;
+  }
+
+  .ac-field {
+    flex: 1 1 calc(50% - 0.45rem);
   }
 
   .ac-field-birth {
+    flex: 1 1 calc(50% - 0.45rem);
     max-width: none;
   }
 }
@@ -777,7 +787,13 @@ h2 {
   }
 
   .ac-filters {
-    grid-template-columns: 1fr;
+    flex-wrap: wrap;
+  }
+
+  .ac-field,
+  .ac-field-birth {
+    flex: 1 1 100%;
+    max-width: none;
   }
 
   .ac-birth {
