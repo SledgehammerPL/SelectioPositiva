@@ -545,6 +545,28 @@ h2 {
   font-weight: 600;
 }
 
+.ac-filters {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.65rem;
+  align-items: end;
+}
+
+.ac-field {
+  display: grid;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.ac-field > span {
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+}
+
+.ac-field-birth {
+  max-width: 11rem;
+}
+
 .ac-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -555,6 +577,10 @@ h2 {
 .ac-combobox {
   position: relative;
   min-width: 0;
+}
+
+.ac-combobox-below {
+  margin-top: 0.45rem;
 }
 
 .ac-input {
@@ -735,8 +761,22 @@ h2 {
   max-width: none;
 }
 
+@media (max-width: 900px) {
+  .ac-filters {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .ac-field-birth {
+    max-width: none;
+  }
+}
+
 @media (max-width: 640px) {
   .ac-row {
+    grid-template-columns: 1fr;
+  }
+
+  .ac-filters {
     grid-template-columns: 1fr;
   }
 

@@ -40,7 +40,9 @@
       const rankList = opts.rankList;
       const form = opts.form;
       const statusEl = opts.statusEl;
-      const queryEl = opts.queryEl;
+      const firstEl = opts.firstEl;
+      const secondEl = opts.secondEl;
+      const lastEl = opts.lastEl;
       const birthEl = opts.birthEl;
       const searchUrl = opts.searchUrl || "";
       const byId = {};
@@ -54,6 +56,7 @@
       });
 
       const emptyRank = document.querySelector(".rank-empty-msg");
+      const focusEl = lastEl || firstEl;
 
       function rankedIds() {
         return Array.from(rankList.querySelectorAll(".candidate-item")).map(
@@ -72,20 +75,34 @@
         if (statusEl) statusEl.textContent = text;
       }
 
-      function queryValue() {
-        return (queryEl && queryEl.value ? queryEl.value : "").trim();
+      function fieldValue(el) {
+        return (el && el.value ? el.value : "").trim();
       }
 
+      function firstValue() {
+        return fieldValue(firstEl);
+      }
+      function secondValue() {
+        return fieldValue(secondEl);
+      }
+      function lastValue() {
+        return fieldValue(lastEl);
+      }
       function birthValue() {
         return birthEl && birthEl.value ? birthEl.value : "";
       }
 
       function filterActive() {
-        return queryValue().length >= MIN_CHARS || !!birthValue();
+        return (
+          firstValue().length >= MIN_CHARS ||
+          secondValue().length >= MIN_CHARS ||
+          lastValue().length >= MIN_CHARS ||
+          !!birthValue()
+        );
       }
 
       function setExpanded(open) {
-        if (queryEl) queryEl.setAttribute("aria-expanded", open ? "true" : "false");
+        if (focusEl) focusEl.setAttribute("aria-expanded", open ? "true" : "false");
       }
 
       function makeRankItem(c) {
@@ -147,11 +164,11 @@
           el.classList.toggle("is-active", i === activeIndex);
           if (i === activeIndex) {
             el.scrollIntoView({ block: "nearest" });
-            if (queryEl) queryEl.setAttribute("aria-activedescendant", el.id);
+            if (focusEl) focusEl.setAttribute("aria-activedescendant", el.id);
           }
         });
-        if (activeIndex < 0 && queryEl) {
-          queryEl.removeAttribute("aria-activedescendant");
+        if (activeIndex < 0 && focusEl) {
+          focusEl.removeAttribute("aria-activedescendant");
         }
       }
 
@@ -171,7 +188,7 @@
         pool.hidden = !open;
         setExpanded(open);
         if (!filterActive()) {
-          setStatus("Zacznij wpisywać, aby zobaczyć podpowiedzi.");
+          setStatus("Podaj imię, nazwisko (min. 3 znaki) lub datę urodzenia.");
           return;
         }
         if (visible === 0) {
@@ -192,10 +209,10 @@
         rankList.appendChild(makeRankItem(c));
         renumber(rankList);
         syncEmpty();
-        if (queryEl) {
-          queryEl.value = "";
-          queryEl.focus();
-        }
+        [firstEl, secondEl, lastEl].forEach((el) => {
+          if (el) el.value = "";
+        });
+        if (focusEl) focusEl.focus();
         scheduleSearch();
         setStatus("Dodano do rankingu.");
       }
@@ -210,12 +227,14 @@
           pool.hidden = true;
           setExpanded(false);
           activeIndex = -1;
-          setStatus("Zacznij wpisywać, aby zobaczyć podpowiedzi.");
+          setStatus("Podaj imię, nazwisko (min. 3 znaki) lub datę urodzenia.");
           return;
         }
 
         const params = new URLSearchParams();
-        params.set("q", queryValue());
+        params.set("first_name", firstValue());
+        params.set("second_name", secondValue());
+        params.set("last_name", lastValue());
         params.set("birth_date", birthValue());
         const exclude = rankedIds();
         if (exclude.length) params.set("exclude", exclude.join(","));
@@ -236,7 +255,7 @@
               pool.innerHTML = "";
               pool.hidden = true;
               setExpanded(false);
-              setStatus("Zacznij wpisywać, aby zobaczyć podpowiedzi.");
+              setStatus("Podaj imię, nazwisko (min. 3 znaki) lub datę urodzenia.");
               return;
             }
             renderResults(data.results || []);
@@ -274,34 +293,37 @@
         scheduleSearch();
       });
 
-      if (queryEl) {
-        queryEl.addEventListener("input", scheduleSearch);
-        queryEl.addEventListener("keydown", (e) => {
-          const items = pool.querySelectorAll(".ac-option");
-          if (e.key === "ArrowDown") {
-            if (!items.length) return;
-            e.preventDefault();
-            activeIndex = Math.min(activeIndex + 1, items.length - 1);
-            highlightActive();
-          } else if (e.key === "ArrowUp") {
-            if (!items.length) return;
-            e.preventDefault();
-            activeIndex = Math.max(activeIndex - 1, 0);
-            highlightActive();
-          } else if (e.key === "Enter") {
-            e.preventDefault();
-            if (activeIndex >= 0 && items[activeIndex]) {
-              addCandidate(byId[items[activeIndex].dataset.id]);
-            } else if (items.length === 1) {
-              addCandidate(byId[items[0].dataset.id]);
-            }
-          } else if (e.key === "Escape") {
-            pool.hidden = true;
-            setExpanded(false);
-            activeIndex = -1;
+      function onFilterKeydown(e) {
+        const items = pool.querySelectorAll(".ac-option");
+        if (e.key === "ArrowDown") {
+          if (!items.length) return;
+          e.preventDefault();
+          activeIndex = Math.min(activeIndex + 1, items.length - 1);
+          highlightActive();
+        } else if (e.key === "ArrowUp") {
+          if (!items.length) return;
+          e.preventDefault();
+          activeIndex = Math.max(activeIndex - 1, 0);
+          highlightActive();
+        } else if (e.key === "Enter") {
+          e.preventDefault();
+          if (activeIndex >= 0 && items[activeIndex]) {
+            addCandidate(byId[items[activeIndex].dataset.id]);
+          } else if (items.length === 1) {
+            addCandidate(byId[items[0].dataset.id]);
           }
-        });
+        } else if (e.key === "Escape") {
+          pool.hidden = true;
+          setExpanded(false);
+          activeIndex = -1;
+        }
       }
+
+      [firstEl, secondEl, lastEl].forEach((el) => {
+        if (!el) return;
+        el.addEventListener("input", scheduleSearch);
+        el.addEventListener("keydown", onFilterKeydown);
+      });
       if (birthEl) {
         birthEl.addEventListener("change", scheduleSearch);
         birthEl.addEventListener("input", scheduleSearch);
@@ -332,7 +354,7 @@
       syncEmpty();
       pool.hidden = true;
       setExpanded(false);
-      setStatus("Zacznij wpisywać, aby zobaczyć podpowiedzi.");
+      setStatus("Podaj imię, nazwisko (min. 3 znaki) lub datę urodzenia.");
       return { addCandidate };
     },
   };

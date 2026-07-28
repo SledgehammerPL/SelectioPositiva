@@ -26,20 +26,32 @@
   </div>
 
   <div class="ac-panel" id="candidate-search-panel" data-search-url="{{ search_url }}">
-    <label class="ac-label" for="candidate-ac-query">Dodaj kandydata</label>
-    <div class="ac-row">
-      <div class="ac-combobox">
-        <input type="search" id="candidate-ac-query" class="ac-input"
-               placeholder="Imię lub nazwisko (min. 3 znaki)…"
-               autocomplete="off" spellcheck="false"
+    <p class="ac-label">Dodaj kandydata</p>
+    <div class="ac-filters">
+      <label class="ac-field">
+        <span>Imię</span>
+        <input type="search" id="candidate-ac-first" class="ac-input"
+               placeholder="min. 3 znaki" autocomplete="off" spellcheck="false">
+      </label>
+      <label class="ac-field">
+        <span>Drugie imię</span>
+        <input type="search" id="candidate-ac-second" class="ac-input"
+               placeholder="opcjonalnie" autocomplete="off" spellcheck="false">
+      </label>
+      <label class="ac-field">
+        <span>Nazwisko</span>
+        <input type="search" id="candidate-ac-last" class="ac-input"
+               placeholder="min. 3 znaki" autocomplete="off" spellcheck="false"
                role="combobox" aria-autocomplete="list"
                aria-controls="candidate-pool" aria-expanded="false">
-        <ul id="candidate-pool" class="ac-list" role="listbox" hidden></ul>
-      </div>
-      <label class="ac-birth">
-        <span>Data ur.</span>
-        <input type="date" id="candidate-ac-birth" autocomplete="off">
       </label>
+      <label class="ac-field ac-field-birth">
+        <span>Data ur.</span>
+        <input type="date" id="candidate-ac-birth" class="ac-input" autocomplete="off">
+      </label>
+    </div>
+    <div class="ac-combobox ac-combobox-below">
+      <ul id="candidate-pool" class="ac-list" role="listbox" hidden></ul>
     </div>
     <div class="ac-actions">
       {% if can_self_nominate %}
@@ -53,8 +65,7 @@
       </button>
     </div>
     <p class="ac-status" id="candidate-search-status" aria-live="polite">
-      Zacznij wpisywać, aby zobaczyć podpowiedzi. Siebie możesz dodać od razu;
-      inną osobę spoza listy zgłoś do administratora.
+      Podaj imię, nazwisko (min. 3 znaki) lub datę urodzenia.
     </p>
   </div>
 
@@ -152,7 +163,9 @@
         pool: document.getElementById('candidate-pool'),
         rankList: document.getElementById('candidate-list'),
         statusEl: document.getElementById('candidate-search-status'),
-        queryEl: document.getElementById('candidate-ac-query'),
+        firstEl: document.getElementById('candidate-ac-first'),
+        secondEl: document.getElementById('candidate-ac-second'),
+        lastEl: document.getElementById('candidate-ac-last'),
         birthEl: document.getElementById('candidate-ac-birth'),
         searchUrl: panel ? panel.dataset.searchUrl : '',
         ranked: JSON.parse(document.getElementById('ranked-data').textContent),
