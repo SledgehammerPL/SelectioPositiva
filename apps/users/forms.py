@@ -1,6 +1,11 @@
 from django import forms
 from django.contrib.auth import get_user_model
-from django.contrib.auth.forms import AuthenticationForm, PasswordChangeForm
+from django.contrib.auth.forms import (
+    AuthenticationForm,
+    PasswordChangeForm,
+    PasswordResetForm,
+    SetPasswordForm,
+)
 from django.contrib.auth.password_validation import validate_password
 
 from elections.models import VoterProfile
@@ -76,6 +81,64 @@ class RegistrationForm(forms.Form):
         if p1:
             validate_password(p1)
         return cleaned
+
+
+class EmailPasswordResetForm(PasswordResetForm):
+    """Reset hasła po adresie email."""
+
+    email = forms.EmailField(
+        label="Email",
+        max_length=254,
+        widget=forms.EmailInput(
+            attrs={
+                "placeholder": "jan@example.com",
+                "autocomplete": "email",
+                "inputmode": "email",
+            }
+        ),
+    )
+
+    def clean_email(self) -> str:
+        return (self.cleaned_data.get("email") or "").strip().lower()
+
+    def get_users(self, email):
+        active_users = User.objects.filter(email__iexact=email, is_active=True)
+        return (u for u in active_users if u.has_usable_password())
+
+    def send_mail(
+        self,
+        subject_template_name,
+        email_template_name,
+        context,
+        from_email,
+        to_email,
+        html_email_template_name=None,
+    ):
+        from django.core.mail import EmailMultiAlternatives, get_connection
+        from django.template import loader
+
+        subject = loader.render_to_string(subject_template_name, context)
+        subject = "".join(subject.splitlines())
+        body = loader.render_to_string(email_template_name, context)
+        connection = get_connection(backend="users.mail.EmailBackend")
+        email_message = EmailMultiAlternatives(
+            subject, body, from_email, [to_email], connection=connection
+        )
+        if html_email_template_name is not None:
+            html_email = loader.render_to_string(html_email_template_name, context)
+            email_message.attach_alternative(html_email, "text/html")
+        email_message.send()
+
+
+class EmailSetPasswordForm(SetPasswordForm):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["new_password1"].label = "Nowe hasło"
+        self.fields["new_password2"].label = "Powtórz nowe hasło"
+        for name in ("new_password1", "new_password2"):
+            self.fields[name].widget.attrs.update(
+                {"placeholder": "••••••••", "autocomplete": "new-password"}
+            )
 
 
 class ProfileDataForm(forms.Form):
