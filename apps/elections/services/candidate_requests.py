@@ -44,7 +44,6 @@ def approve_candidate_request(
 
     VoterProfile.objects.create(
         user=user,
-        phone=None,
         birth_date=request_obj.birth_date,
         territorial_unit=precinct,
     )

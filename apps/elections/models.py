@@ -40,13 +40,12 @@ class VoterProfile(models.Model):
         blank=True,
         help_text="Wymagana do weryfikacji limitu wieku w okręgu wyborczym.",
     )
-    phone = models.CharField(
-        "telefon",
-        max_length=16,
-        unique=True,
-        null=True,
+    second_name = models.CharField(
+        "drugie imię",
+        max_length=150,
         blank=True,
-        help_text="Opcjonalny numer w formacie +48XXXXXXXXX.",
+        default="",
+        help_text="Opcjonalne drugie imię.",
     )
 
     class Meta:
@@ -54,10 +53,20 @@ class VoterProfile(models.Model):
         verbose_name_plural = "profile wyborców"
 
     def __str__(self) -> str:
-        label = self.phone or str(self.user_id)
+        name = self.full_name()
         if self.territorial_unit_id:
-            return f"{label} ({self.territorial_unit})"
-        return label
+            return f"{name} ({self.territorial_unit})"
+        return name
+
+    def full_name(self) -> str:
+        parts = [
+            self.user.first_name,
+            self.second_name,
+            self.user.last_name,
+        ]
+        return " ".join(p for p in parts if p).strip() or (
+            self.user.email or str(self.user_id)
+        )
 
     def can_vote(self) -> bool:
         """Głosować może tylko użytkownik przypisany do obwodu."""

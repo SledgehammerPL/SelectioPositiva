@@ -276,6 +276,9 @@ def register(request: HttpRequest) -> HttpResponse:
             email=form.cleaned_data["email"],
             birth_date=form.cleaned_data["birth_date"],
             password=form.cleaned_data["password1"],
+            first_name=form.cleaned_data["first_name"],
+            second_name=form.cleaned_data.get("second_name") or "",
+            last_name=form.cleaned_data["last_name"],
         )
         uid = make_email_uid(user)
         token = email_verification_token.make_token(user)

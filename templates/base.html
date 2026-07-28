@@ -24,7 +24,7 @@
       <a class="nav-link" href="{% url 'results' %}">Wyniki</a>
       <a class="nav-link" href="{% url 'dashboard' %}">Panel</a>
       <a class="nav-link" href="{% url 'change_station' %}">Komisja</a>
-      <span class="nav-user">{% firstof user.get_full_name user.email user.pk %}</span>
+      <span class="nav-user">{% if user.voter_profile %}{{ user.voter_profile.full_name }}{% else %}{% firstof user.get_full_name user.email user.pk %}{% endif %}</span>
       <form method="post" action="{% url 'logout' %}" class="inline-form">
         {% csrf_token %}
         <button type="submit" class="btn btn-ghost">Wyloguj</button>

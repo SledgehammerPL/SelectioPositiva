@@ -25,15 +25,20 @@ class VoterProfileInline(admin.StackedInline):
     can_delete = False
     fk_name = "user"
     raw_id_fields = ("territorial_unit",)
-    fields = ("phone", "birth_date", "territorial_unit")
+    fields = ("second_name", "birth_date", "territorial_unit")
 
 
 class UserWithProfileAdmin(BaseUserAdmin):
     inlines = (VoterProfileInline,)
-    list_display = ("phone_display", "first_name", "last_name", "is_staff", "is_active")
-    search_fields = ("first_name", "last_name", "email", "voter_profile__phone")
+    list_display = ("email", "first_name", "last_name", "second_name_display", "is_staff", "is_active")
+    search_fields = (
+        "first_name",
+        "last_name",
+        "email",
+        "voter_profile__second_name",
+    )
     ordering = ("pk",)
-    # Username jest tylko wewnętrzne (u{id}) — logowanie po telefonie.
+    # Username jest tylko wewnętrzne (u{id}) — logowanie po email.
     fieldsets = (
         (None, {"fields": ("password",)}),
         (_("Dane osobowe"), {"fields": ("first_name", "last_name", "email")}),
@@ -56,19 +61,19 @@ class UserWithProfileAdmin(BaseUserAdmin):
             None,
             {
                 "classes": ("wide",),
-                "fields": ("password1", "password2"),
+                "fields": ("email", "first_name", "last_name", "password1", "password2"),
                 "description": (
-                    "Po utworzeniu uzupełnij telefon (+48…) w profilu wyborcy — "
-                    "to login użytkownika."
+                    "Po utworzeniu uzupełnij drugie imię i jednostkę w profilu wyborcy. "
+                    "Logowanie po email."
                 ),
             },
         ),
     )
 
-    @admin.display(description="Telefon")
-    def phone_display(self, obj):
+    @admin.display(description="Drugie imię")
+    def second_name_display(self, obj):
         try:
-            return obj.voter_profile.phone
+            return obj.voter_profile.second_name or "—"
         except VoterProfile.DoesNotExist:
             return "—"
 
@@ -128,7 +133,7 @@ class BallotAdmin(admin.ModelAdmin):
     search_fields = (
         "user__first_name",
         "user__last_name",
-        "user__voter_profile__phone",
+        "user__email",
         "district__name",
     )
     raw_id_fields = ("user", "district")
@@ -137,9 +142,14 @@ class BallotAdmin(admin.ModelAdmin):
 
 @admin.register(VoterProfile)
 class VoterProfileAdmin(admin.ModelAdmin):
-    list_display = ("phone", "user", "territorial_unit", "birth_date")
+    list_display = ("user", "second_name", "territorial_unit", "birth_date")
     list_filter = ("territorial_unit__kind",)
-    search_fields = ("phone", "user__first_name", "user__last_name")
+    search_fields = (
+        "second_name",
+        "user__first_name",
+        "user__last_name",
+        "user__email",
+    )
     raw_id_fields = ("user", "territorial_unit")
 
 

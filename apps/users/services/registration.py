@@ -40,12 +40,17 @@ def register_user(
     email: str,
     birth_date: date,
     password: str,
+    first_name: str,
+    last_name: str,
+    second_name: str = "",
 ) -> User:
-    """Tworzy nieaktywne konto + profil z datą urodzenia."""
+    """Tworzy nieaktywne konto + profil (imiona, nazwisko, data urodzenia)."""
     normalized = email.strip().lower()
     user = User(
         username=f"_tmp_{normalized[:20]}",
         email=normalized,
+        first_name=first_name.strip(),
+        last_name=last_name.strip(),
         is_active=False,
     )
     user.set_password(password)
@@ -55,7 +60,7 @@ def register_user(
 
     VoterProfile.objects.create(
         user=user,
-        phone=None,
+        second_name=(second_name or "").strip(),
         birth_date=birth_date,
         territorial_unit=None,
     )

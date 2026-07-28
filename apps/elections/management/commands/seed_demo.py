@@ -16,7 +16,7 @@ from django.db import transaction
 
 from elections.models import ElectoralDistrict, Office, Party, VoterProfile
 from geo.models import PollingStation, TerritorialLevel, TerritorialUnit
-from users.services.accounts import ensure_user_with_phone
+from users.services.accounts import ensure_user
 
 # slug → (min_age, candidacy_level_slug)
 OFFICE_CONSTRAINTS = {
@@ -32,8 +32,7 @@ OFFICE_CONSTRAINTS = {
     "radny": (18, "municipality"),
 }
 
-# Stałe numery demo (logowanie).
-DEMO_PHONE = "+48500100100"
+DEMO_EMAIL = "demo@selectio.local"
 
 # Slugi/kody tworzone kiedyś przez seed — do usunięcia przy obecności PKW.
 DEMO_UNIT_SLUGS = (
@@ -170,43 +169,42 @@ class Command(BaseCommand):
             d.territorial_units.set([poland])
 
         # ── Użytkownicy demo na prawdziwych obwodach ─────────────────────────
-        # (phone, first_name, last_name, birth_date, station)
+        # (email, first_name, last_name, birth_date, station)
         candidates_data = [
-            ("+48500100101", "Anna", "Kowalska", date(1975, 3, 15), station),
-            ("+48500100102", "Jan", "Nowak", date(1968, 7, 22), station),
-            ("+48500100103", "Piotr", "Wisniewski", date(1982, 1, 5), station),
-            ("+48500100104", "Maria", "Zielinska", date(1990, 11, 30), station),
-            ("+48500100105", "Ewa", "Maj", date(1978, 6, 10), station),
-            ("+48500100106", "Tomasz", "Krol", date(1985, 9, 18), station),
-            ("+48500100107", "Barbara", "Lewandowska", date(1972, 4, 25), station),
-            ("+48500100108", "Hanna", "Nowicka", date(1980, 2, 14), station_waw),
-            ("+48500100109", "Stefan", "Borkowski", date(1965, 12, 3), station_waw),
-            ("+48500100110", "Julia", "Malinowska", date(1993, 8, 27), station_waw),
-            ("+48500100111", "Adam", "Warszawski", date(1977, 5, 9), station_waw),
+            ("anna.kowalska@selectio.local", "Anna", "Kowalska", date(1975, 3, 15), station),
+            ("jan.nowak@selectio.local", "Jan", "Nowak", date(1968, 7, 22), station),
+            ("piotr.wisniewski@selectio.local", "Piotr", "Wisniewski", date(1982, 1, 5), station),
+            ("maria.zielinska@selectio.local", "Maria", "Zielinska", date(1990, 11, 30), station),
+            ("ewa.maj@selectio.local", "Ewa", "Maj", date(1978, 6, 10), station),
+            ("tomasz.krol@selectio.local", "Tomasz", "Krol", date(1985, 9, 18), station),
+            ("barbara.lewandowska@selectio.local", "Barbara", "Lewandowska", date(1972, 4, 25), station),
+            ("hanna.nowicka@selectio.local", "Hanna", "Nowicka", date(1980, 2, 14), station_waw),
+            ("stefan.borkowski@selectio.local", "Stefan", "Borkowski", date(1965, 12, 3), station_waw),
+            ("julia.malinowska@selectio.local", "Julia", "Malinowska", date(1993, 8, 27), station_waw),
+            ("adam.warszawski@selectio.local", "Adam", "Warszawski", date(1977, 5, 9), station_waw),
         ]
-        for phone, first_name, last_name, birth_date, st in candidates_data:
-            ensure_user_with_phone(
-                phone=phone,
+        for email, first_name, last_name, birth_date, st in candidates_data:
+            ensure_user(
+                email=email,
                 password="demo1234",
                 first_name=first_name,
                 last_name=last_name,
-                email=f"{phone.replace('+', '')}@selectio.local",
                 birth_date=birth_date,
                 territorial_unit=st.precinct,
             )
 
-        ensure_user_with_phone(
-            phone=DEMO_PHONE,
+        ensure_user(
+            email=DEMO_EMAIL,
             password="demo1234",
             first_name="Anna",
+            second_name="Maria",
             last_name="Wyborcza",
-            email="demo@selectio.local",
             birth_date=date(1990, 5, 12),
             territorial_unit=station.precinct,
         )
 
         self.stdout.write(self.style.SUCCESS("Seed demo OK (bez geografii demo)."))
-        self.stdout.write(f"  Login: {DEMO_PHONE} / demo1234")
+        self.stdout.write(f"  Login: {DEMO_EMAIL} / demo1234")
         self.stdout.write(f"  Obwód demo: {station.precinct}")
         self.stdout.write(f"  Komisja (lokalizacja): {station}")
 

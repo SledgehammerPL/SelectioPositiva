@@ -1,4 +1,4 @@
-"""Tworzenie użytkowników logujących się numerem telefonu."""
+"""Tworzenie / aktualizacja użytkowników (login po email)."""
 
 from __future__ import annotations
 
@@ -8,33 +8,29 @@ from django.contrib.auth import get_user_model
 from django.db import transaction
 
 from elections.models import VoterProfile
-from users.phone import normalize_pl_phone
 
 User = get_user_model()
 
 
 @transaction.atomic
-def ensure_user_with_phone(
+def ensure_user(
     *,
-    phone: str,
+    email: str,
     password: str | None = None,
     first_name: str = "",
+    second_name: str = "",
     last_name: str = "",
-    email: str = "",
     birth_date: date | None = None,
     territorial_unit=None,
     is_staff: bool = False,
 ) -> User:
     """
-    Znajduje użytkownika po telefonie albo tworzy nowego.
-    `User.username` jest wewnętrzne (`u{id}`) — logowanie tylko po telefonie.
+    Znajduje użytkownika po emailu albo tworzy nowego.
+    `User.username` jest wewnętrzne (`u{id}`) — logowanie po email.
     """
-    normalized = normalize_pl_phone(phone)
-    profile = (
-        VoterProfile.objects.select_related("user").filter(phone=normalized).first()
-    )
-    if profile is not None:
-        user = profile.user
+    normalized = email.strip().lower()
+    user = User.objects.filter(email__iexact=normalized).first()
+    if user is not None:
         changed = False
         if first_name and user.first_name != first_name:
             user.first_name = first_name
@@ -42,15 +38,15 @@ def ensure_user_with_phone(
         if last_name and user.last_name != last_name:
             user.last_name = last_name
             changed = True
-        if email and user.email != email:
-            user.email = email
-            changed = True
         if changed:
             user.save()
         if password:
             user.set_password(password)
             user.save(update_fields=["password"])
+        profile, _ = VoterProfile.objects.get_or_create(user=user)
         updates = {}
+        if second_name and profile.second_name != second_name:
+            updates["second_name"] = second_name
         if birth_date is not None:
             updates["birth_date"] = birth_date
         if territorial_unit is not None:
@@ -62,10 +58,10 @@ def ensure_user_with_phone(
         return user
 
     user = User(
-        username=f"_tmp_{normalized.replace('+', '')}",
+        username=f"_tmp_{normalized[:20]}",
         first_name=first_name,
         last_name=last_name,
-        email=email or "",
+        email=normalized,
         is_staff=is_staff,
     )
     if password:
@@ -78,7 +74,7 @@ def ensure_user_with_phone(
 
     VoterProfile.objects.create(
         user=user,
-        phone=normalized,
+        second_name=second_name or "",
         birth_date=birth_date,
         territorial_unit=territorial_unit,
     )

@@ -42,19 +42,24 @@ class ElectionLogoutView(LogoutView):
 
 
 def _user_payload(user) -> dict:
-    full = f"{user.first_name} {user.last_name}".strip()
     birth = None
+    second = ""
     try:
         profile = user.voter_profile
         if profile:
             if profile.birth_date:
                 birth = str(profile.birth_date)
+            second = profile.second_name or ""
+            name = profile.full_name()
+        else:
+            name = f"{user.first_name} {user.last_name}".strip()
     except Exception:
-        pass
+        name = f"{user.first_name} {user.last_name}".strip()
     return {
         "id": user.pk,
-        "name": full or user.email or f"#{user.pk}",
+        "name": name or user.email or f"#{user.pk}",
         "birth_date": birth,
+        "second_name": second,
     }
 
 

@@ -43,13 +43,12 @@ def _make_station(code: str, precinct: TerritorialUnit) -> PollingStation:
 
 def _make_user(label: str, station: PollingStation, birth_year: int = 1985) -> User:
     from datetime import date
-    from users.services.accounts import ensure_user_with_phone
+    from users.services.accounts import ensure_user
 
-    # Unikalny fikcyjny numer na bazie etykiety testu.
     digit_tail = abs(hash(label)) % 100_000_000
-    phone = f"+485{digit_tail:08d}"
-    return ensure_user_with_phone(
-        phone=phone,
+    email = f"{label}.{digit_tail}@selectio.test"
+    return ensure_user(
+        email=email,
         password="x",
         first_name=label.capitalize()[:30],
         last_name="Testowy",
@@ -182,10 +181,10 @@ class EligibilityByHierarchyTests(TestCase):
         self.assertIn("eh-d-prez", eligible)
 
     def test_no_station_cannot_vote(self):
-        from users.services.accounts import ensure_user_with_phone
+        from users.services.accounts import ensure_user
 
-        user = ensure_user_with_phone(
-            phone="+48509999999",
+        user = ensure_user(
+            email="bez.obwodu@selectio.test",
             password="x",
             first_name="Bez",
             last_name="Obwodu",
