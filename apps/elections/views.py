@@ -83,11 +83,11 @@ def _search_users_for_district(
 
     ref = today or date.today()
 
-    # Wyborcy z obwodem (mogą głosować/kandydować)
+    # Kandydaci: profil z dowolną jednostką (obwód lub np. gmina urodzenia).
     eligible_user_ids = list(
-        VoterProfile.objects.filter(
-            territorial_unit__kind=TerritorialUnit.Kind.PRECINCT,
-        ).values_list("user_id", flat=True)
+        VoterProfile.objects.filter(territorial_unit__isnull=False).values_list(
+            "user_id", flat=True
+        )
     )
 
     qs = User.objects.filter(
