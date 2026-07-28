@@ -284,6 +284,9 @@ def register(request: HttpRequest) -> HttpResponse:
             reverse("verify_email", kwargs={"uidb64": uid, "token": token})
         )
         try:
+            from django.core.mail import get_connection
+
+            connection = get_connection(backend="users.mail.EmailBackend")
             send_mail(
                 subject="Selectio Positiva — potwierdź rejestrację",
                 message=(
@@ -294,6 +297,7 @@ def register(request: HttpRequest) -> HttpResponse:
                 ),
                 from_email=settings.DEFAULT_FROM_EMAIL,
                 recipient_list=[user.email],
+                connection=connection,
                 fail_silently=False,
             )
         except Exception as exc:

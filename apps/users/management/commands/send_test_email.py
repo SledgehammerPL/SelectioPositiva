@@ -43,17 +43,30 @@ class Command(BaseCommand):
         self.stdout.write(f"  EMAIL_USE_TLS     = {settings.EMAIL_USE_TLS}")
         self.stdout.write(f"  EMAIL_USE_SSL     = {settings.EMAIL_USE_SSL}")
         self.stdout.write(
-            f"  EMAIL_SSL_VERIFY  = {getattr(settings, 'EMAIL_SSL_VERIFY', True)}"
+            f"  EMAIL_SSL_VERIFY  = {getattr(settings, 'EMAIL_SSL_VERIFY', True)!r}"
         )
         self.stdout.write(f"  FROM              = {from_email}")
         self.stdout.write(f"  TO                = {to}")
+
+        # Pokaż, jaki kontekst zbuduje nasz backend.
+        from users.mail import EmailBackend, build_ssl_context
+
+        ctx = build_ssl_context()
+        self.stdout.write(
+            f"  ssl verify_mode   = {ctx.verify_mode} "
+            f"(0=NONE, check_hostname={ctx.check_hostname})"
+        )
+        self.stdout.write(f"  backend class    = {EmailBackend}")
 
         if options["raw"]:
             self._raw_smtp(settings, from_email, to)
             return
 
         try:
-            connection = get_connection(fail_silently=False)
+            connection = get_connection(
+                backend="users.mail.EmailBackend",
+                fail_silently=False,
+            )
             sent = send_mail(
                 subject="Selectio Positiva — test SMTP",
                 message=(

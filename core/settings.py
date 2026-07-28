@@ -108,10 +108,8 @@ LOGIN_REDIRECT_URL = "dashboard"
 LOGOUT_REDIRECT_URL = "login"
 
 # Email — lokalny Postfix wymaga STARTTLS, często ze self-signed certem.
-EMAIL_BACKEND = env(
-    "EMAIL_BACKEND",
-    default="users.mail.EmailBackend",
-)
+# Zawsze users.mail.EmailBackend (obsługa EMAIL_SSL_VERIFY).
+EMAIL_BACKEND = "users.mail.EmailBackend"
 EMAIL_HOST = env("EMAIL_HOST", default="127.0.0.1")
 EMAIL_PORT = env.int("EMAIL_PORT", default=587)
 EMAIL_HOST_USER = env("EMAIL_HOST_USER", default="")
