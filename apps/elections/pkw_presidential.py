@@ -1,54 +1,56 @@
 """
-Kandydaci na Prezydenta RP 2025 — dane z obwieszczenia PKW.
+Kandydaci na Prezydenta RP 2025 — dane z obwieszczenia PKW (23.04.2025).
 
-Obwieszczenie PKW: imiona, wiek, miejsce zamieszkania.
-Jednostka terytorialna profilu = gmina/powiat zamieszkania (z PKW).
-Data urodzenia (opcjonalnie) z publicznych biografii — PKW podaje tylko wiek.
+Źródło: https://prezydent2025.pkw.gov.pl/ (obwieszczenie o zarejestrowanych
+kandydatach). Lista jest stała w kodzie — bez pobierania PDF / pypdf.
+
+Jednostka terytorialna profilu = zamieszkanie z PKW (mapowane na TerritorialUnit).
+Data urodzenia: dokładna z biografii publicznych albo przybliżenie z wieku PKW.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-from pathlib import Path
-
-# Oficjalne PDF obwieszczenia PKW (23.04.2025).
-PKW_CANDIDATES_PDF_URL = (
-    "https://prezydent2025.pkw.gov.pl/prezydent2025/statics/"
-    "PKW_OBWIESZCZENIA/uploaded_files/"
-    "1745431277_obwieszczenie-o-zarejestrowanych-kandydatach.pdf"
-)
 
 ELECTION_DAY = date(2025, 5, 18)
 
+PKW_OBWIESZCZENIE_URL = (
+    "https://prezydent2025.pkw.gov.pl/prezydent2025/pl/pkw_obwieszczenia/69029"
+)
+
 
 @dataclass(frozen=True)
-class BirthDateHint:
-    """Dokładna data urodzenia (PKW podaje tylko wiek)."""
-
+class PresidentialCandidate:
     last_name: str
-    birth_date: date
+    first_name: str
+    second_name: str
+    age: int
+    """Wiek wg obwieszczenia PKW (na wybory 18.05.2025)."""
+    residence_key: str
+    """Klucz do RESIDENCE_MAP (locativus z PKW, lower)."""
+    birth_date: date | None = None
+    """Dokładna data urodzenia, jeśli znana; inaczej z age."""
 
 
-# Klucz: nazwisko UPPER jak w obwieszczeniu PKW.
-BIRTH_DATES: dict[str, BirthDateHint] = {
-    "BARTOSZEWICZ": BirthDateHint("BARTOSZEWICZ", date(1974, 1, 18)),
-    "BIEJAT": BirthDateHint("BIEJAT", date(1982, 1, 11)),
-    "BRAUN": BirthDateHint("BRAUN", date(1967, 3, 11)),
-    "HOŁOWNIA": BirthDateHint("HOŁOWNIA", date(1976, 9, 3)),
-    "JAKUBIAK": BirthDateHint("JAKUBIAK", date(1959, 4, 30)),
-    "MACIAK": BirthDateHint("MACIAK", date(1970, 7, 30)),
-    "MENTZEN": BirthDateHint("MENTZEN", date(1986, 11, 20)),
-    "NAWROCKI": BirthDateHint("NAWROCKI", date(1983, 3, 3)),
-    "SENYSZYN": BirthDateHint("SENYSZYN", date(1949, 2, 1)),
-    "STANOWSKI": BirthDateHint("STANOWSKI", date(1982, 5, 21)),
-    "TRZASKOWSKI": BirthDateHint("TRZASKOWSKI", date(1972, 1, 17)),
-    "WOCH": BirthDateHint("WOCH", date(1978, 12, 17)),
-    "ZANDBERG": BirthDateHint("ZANDBERG", date(1979, 12, 4)),
-}
+# Kolejność jak w obwieszczeniu PKW.
+CANDIDATES: tuple[PresidentialCandidate, ...] = (
+    PresidentialCandidate("Bartoszewicz", "Artur", "", 51, "warszawie", date(1974, 1, 18)),
+    PresidentialCandidate("Biejat", "Magdalena", "Agnieszka", 43, "warszawie", date(1982, 1, 11)),
+    PresidentialCandidate("Braun", "Grzegorz", "Michał", 58, "rzeszowie", date(1967, 3, 11)),
+    PresidentialCandidate("Hołownia", "Szymon", "Franciszek", 48, "otwocku", date(1976, 9, 3)),
+    PresidentialCandidate("Jakubiak", "Marek", "", 66, "warszawie", date(1959, 4, 30)),
+    PresidentialCandidate("Maciak", "Maciej", "", 54, "włocławku", date(1970, 7, 30)),
+    PresidentialCandidate("Mentzen", "Sławomir", "Jerzy", 38, "toruniu", date(1986, 11, 20)),
+    PresidentialCandidate("Nawrocki", "Karol", "Tadeusz", 42, "gdańsku", date(1983, 3, 3)),
+    PresidentialCandidate("Senyszyn", "Joanna", "", 76, "warszawie", date(1949, 2, 1)),
+    PresidentialCandidate("Stanowski", "Krzysztof", "Jakub", 42, "wilczej górze", date(1982, 5, 21)),
+    PresidentialCandidate("Trzaskowski", "Rafał", "Kazimierz", 53, "warszawie", date(1972, 1, 17)),
+    PresidentialCandidate("Woch", "Marek", "Marian", 46, "kąkolewnicy", date(1978, 12, 17)),
+    PresidentialCandidate("Zandberg", "Adrian", "Tadeusz", 45, "warszawie", date(1979, 12, 4)),
+)
 
-# Locativus z PDF PKW → (nazwa do wyszukania, teryt|None, kind).
-# Warszawa = powiat (dzielnice jako gminy w TERYT).
+# Locativus z PKW → (nazwa, teryt|None, kind). Warszawa = powiat (dzielnice).
 RESIDENCE_MAP: dict[str, tuple[str, str | None, str]] = {
     "warszawie": ("Warszawa", "1465", "county"),
     "rzeszowie": ("Rzeszów", "186301", "municipality"),
@@ -63,16 +65,10 @@ RESIDENCE_MAP: dict[str, tuple[str, str | None, str]] = {
 
 
 def approximate_birth_date(age: int, *, on: date = ELECTION_DAY) -> date:
-    """Przybliżona data urodzenia z wieku na dzień wyborów (1 stycznia roku)."""
     return date(on.year - age, 1, 1)
 
 
-def default_cache_path() -> Path:
-    # apps/elections/pkw_presidential.py → project root = parents[2]
-    return (
-        Path(__file__).resolve().parents[2]
-        / "data"
-        / "pkw"
-        / "cache"
-        / "obwieszczenie-o-zarejestrowanych-kandydatach.pdf"
-    )
+def birth_date_for(candidate: PresidentialCandidate) -> date:
+    if candidate.birth_date is not None:
+        return candidate.birth_date
+    return approximate_birth_date(candidate.age, on=ELECTION_DAY)

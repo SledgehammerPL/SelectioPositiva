@@ -25,6 +25,7 @@ SOURCES = {
     "prot_rada_powiatu": "dane/2024/samorzad/protokoly_po_obwodach_rada_powiatu_csv.zip",
     "prot_rada_gminy_gt20": "dane/2024/samorzad/protokoly_po_obwodach_rady_gmin_powyzej_20k_csv.zip",
     "prot_rada_gminy_lt20": "dane/2024/samorzad/protokoly_po_obwodach_rady_gmin_do_20k_csv.zip",
+    "kandydaci_euro": "dane/2024/parlament_eu/kandydaci_csv.zip",
 }
 
 
