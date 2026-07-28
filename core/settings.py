@@ -107,19 +107,20 @@ LOGIN_URL = "login"
 LOGIN_REDIRECT_URL = "dashboard"
 LOGOUT_REDIRECT_URL = "login"
 
-# Email (weryfikacja rejestracji).
-# Lokalny Postfix: 127.0.0.1:25 bez TLS / bez auth (nie używaj submission:587 + STARTTLS).
+# Email — lokalny Postfix wymaga STARTTLS, często ze self-signed certem.
 EMAIL_BACKEND = env(
     "EMAIL_BACKEND",
-    default="django.core.mail.backends.smtp.EmailBackend",
+    default="users.mail.EmailBackend",
 )
 EMAIL_HOST = env("EMAIL_HOST", default="127.0.0.1")
-EMAIL_PORT = env.int("EMAIL_PORT", default=25)
+EMAIL_PORT = env.int("EMAIL_PORT", default=587)
 EMAIL_HOST_USER = env("EMAIL_HOST_USER", default="")
 EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", default="")
-EMAIL_USE_TLS = env.bool("EMAIL_USE_TLS", default=False)
+EMAIL_USE_TLS = env.bool("EMAIL_USE_TLS", default=True)
 EMAIL_USE_SSL = env.bool("EMAIL_USE_SSL", default=False)
-# Musi być adres z domeną akceptowaną przez Postfix (nie .local — reject_unknown_sender_domain).
+# False = nie weryfikuj certyfikatu TLS (localhost / self-signed Postfix).
+EMAIL_SSL_VERIFY = env.bool("EMAIL_SSL_VERIFY", default=False)
+# Adres FROM musi mieć domenę akceptowaną przez Postfix (nie *.local).
 DEFAULT_FROM_EMAIL = env(
     "DEFAULT_FROM_EMAIL",
     default="noreply@sp.devel.b6a.pl",

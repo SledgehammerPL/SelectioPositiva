@@ -37,13 +37,16 @@ class Command(BaseCommand):
         from_email = (options["from_email"] or settings.DEFAULT_FROM_EMAIL).strip()
 
         self.stdout.write("Konfiguracja Django:")
-        self.stdout.write(f"  EMAIL_BACKEND = {settings.EMAIL_BACKEND}")
-        self.stdout.write(f"  EMAIL_HOST    = {settings.EMAIL_HOST}")
-        self.stdout.write(f"  EMAIL_PORT    = {settings.EMAIL_PORT}")
-        self.stdout.write(f"  EMAIL_USE_TLS = {settings.EMAIL_USE_TLS}")
-        self.stdout.write(f"  EMAIL_USE_SSL = {settings.EMAIL_USE_SSL}")
-        self.stdout.write(f"  FROM          = {from_email}")
-        self.stdout.write(f"  TO            = {to}")
+        self.stdout.write(f"  EMAIL_BACKEND     = {settings.EMAIL_BACKEND}")
+        self.stdout.write(f"  EMAIL_HOST        = {settings.EMAIL_HOST}")
+        self.stdout.write(f"  EMAIL_PORT        = {settings.EMAIL_PORT}")
+        self.stdout.write(f"  EMAIL_USE_TLS     = {settings.EMAIL_USE_TLS}")
+        self.stdout.write(f"  EMAIL_USE_SSL     = {settings.EMAIL_USE_SSL}")
+        self.stdout.write(
+            f"  EMAIL_SSL_VERIFY  = {getattr(settings, 'EMAIL_SSL_VERIFY', True)}"
+        )
+        self.stdout.write(f"  FROM              = {from_email}")
+        self.stdout.write(f"  TO                = {to}")
 
         if options["raw"]:
             self._raw_smtp(settings, from_email, to)
@@ -70,6 +73,7 @@ class Command(BaseCommand):
 
     def _raw_smtp(self, settings, from_email: str, to: str) -> None:
         import smtplib
+        import ssl
         from email.message import EmailMessage
 
         host = settings.EMAIL_HOST
@@ -80,11 +84,15 @@ class Command(BaseCommand):
             with smtplib.SMTP(host, port, timeout=15) as smtp:
                 smtp.set_debuglevel(1)
                 code, msg = smtp.ehlo()
-                self.stdout.write(f"EHLO → {code} {msg!r}")
+                self.stdout.write(f"EHLO -> {code} {msg!r}")
 
                 if settings.EMAIL_USE_TLS:
-                    code, msg = smtp.starttls()
-                    self.stdout.write(f"STARTTLS → {code} {msg!r}")
+                    ctx = None
+                    if not getattr(settings, "EMAIL_SSL_VERIFY", True):
+                        ctx = ssl._create_unverified_context()
+                        self.stdout.write("STARTTLS z EMAIL_SSL_VERIFY=False")
+                    code, msg = smtp.starttls(context=ctx)
+                    self.stdout.write(f"STARTTLS -> {code} {msg!r}")
                     smtp.ehlo()
 
                 if settings.EMAIL_HOST_USER:
