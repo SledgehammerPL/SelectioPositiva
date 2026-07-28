@@ -118,9 +118,13 @@
           <span class="drag-handle" title="Przeciągnij" aria-hidden="true">⋮⋮</span>
           <div class="candidate-body">
             <strong>{% if u.voter_profile %}{{ u.voter_profile.full_name }}{% else %}{{ u.get_full_name|default:u.email }}{% endif %}</strong>
-            {% if u.voter_profile.birth_date %}
-            <span class="candidate-committee">ur. {{ u.voter_profile.birth_date|date:"Y-m-d" }}</span>
+            {% with profile=u.voter_profile %}
+            {% with gmina=profile.residence_municipality_name %}
+            {% if profile.birth_date or gmina %}
+            <span class="candidate-committee">{% if profile.birth_date %}ur. {{ profile.birth_date|date:"Y-m-d" }}{% endif %}{% if profile.birth_date and gmina %} · {% endif %}{% if gmina %}zam. {{ gmina }}{% endif %}</span>
             {% endif %}
+            {% endwith %}
+            {% endwith %}
           </div>
           <button type="button" class="btn btn-ghost btn-sm js-remove-rank" title="Usuń z rankingu">Usuń</button>
           <input type="hidden" name="ranked_user_ids" value="{{ u.pk }}">

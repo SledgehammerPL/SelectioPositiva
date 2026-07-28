@@ -59,6 +59,7 @@ class ElectionLogoutView(LogoutView):
 def _user_payload(user) -> dict:
     birth = None
     second = ""
+    municipality = None
     try:
         profile = user.voter_profile
         if profile:
@@ -66,6 +67,7 @@ def _user_payload(user) -> dict:
                 birth = str(profile.birth_date)
             second = profile.second_name or ""
             name = profile.full_name()
+            municipality = profile.residence_municipality_name()
         else:
             name = f"{user.first_name} {user.last_name}".strip()
     except Exception:
@@ -75,6 +77,7 @@ def _user_payload(user) -> dict:
         "name": name or user.email or f"#{user.pk}",
         "birth_date": birth,
         "second_name": second,
+        "municipality": municipality,
     }
 
 

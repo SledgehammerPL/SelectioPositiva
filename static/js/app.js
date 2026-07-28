@@ -117,16 +117,14 @@
           '<input type="hidden" name="ranked_user_ids" value="">';
         li.querySelector("strong").textContent = c.name;
         const body = li.querySelector(".candidate-body");
-        if (c.birth_date) {
+        const metaBits = [];
+        if (c.birth_date) metaBits.push("ur. " + c.birth_date);
+        if (c.municipality) metaBits.push("zam. " + c.municipality);
+        if (c.committee) metaBits.push(c.committee);
+        if (metaBits.length) {
           const span = document.createElement("span");
           span.className = "candidate-committee";
-          span.textContent = "ur. " + c.birth_date;
-          body.appendChild(span);
-        }
-        if (c.committee) {
-          const span = document.createElement("span");
-          span.className = "candidate-committee";
-          span.textContent = c.committee;
+          span.textContent = metaBits.join(" · ");
           body.appendChild(span);
         }
         li.querySelector('input[name="ranked_user_ids"]').value = String(
@@ -144,6 +142,7 @@
         li.id = "ac-opt-" + c.id;
         const metaBits = [];
         if (c.birth_date) metaBits.push("ur. " + c.birth_date);
+        if (c.municipality) metaBits.push("zam. " + c.municipality);
         if (c.parties) metaBits.push(c.parties);
         if (c.committee) metaBits.push(c.committee);
         li.innerHTML =

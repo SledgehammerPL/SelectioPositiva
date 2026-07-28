@@ -30,7 +30,7 @@ def ensure_user(
 ) -> User:
     """
     Znajduje użytkownika po emailu, potem po tożsamości
-    (imię + miasto + data ur.), albo tworzy nowego.
+    (imię + spokrewniona jednostka + data ur.), albo tworzy nowego.
     `User.username` jest wewnętrzne (`u{id}`) — logowanie po email.
     """
     normalized = email.strip().lower()

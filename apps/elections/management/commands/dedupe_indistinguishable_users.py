@@ -1,5 +1,7 @@
 """
-Usuwa zdublowane konta nierozróżnialnych osób (to samo imię/nazwisko/miasto/data ur.).
+Usuwa zdublowane konta nierozróżnialnych osób
+(to samo imię/2. imię/nazwisko; jednostka ta sama lub w hierarchii;
+data ur. zgodna — brak daty + znana data = ta sama osoba).
 
 Zostawia użytkownika o najniższym id; usuwa pozostałych.
 Przemapowuje Ballot.ranked_user_ids.
@@ -22,7 +24,7 @@ from elections.services.identity import (
 class Command(BaseCommand):
     help = (
         "Deduplikacja nierozróżnialnych użytkowników "
-        "(imię + 2. imię + nazwisko + jednostka + data ur.)"
+        "(imię + 2. imię + nazwisko + spokrewniona jednostka + data ur.)"
     )
 
     def add_arguments(self, parser):
@@ -48,7 +50,7 @@ class Command(BaseCommand):
         self.stdout.write(f"Kont do usunięcia (wyższe id): {extra}")
 
         for key, users in groups[:show]:
-            first, second, last, unit_id = key
+            first, second, last = key
             name = " ".join(p for p in (first, second, last) if p)
             births = sorted(
                 {
@@ -57,9 +59,17 @@ class Command(BaseCommand):
                     if getattr(u, "voter_profile", None)
                 }
             )
+            units = sorted(
+                {
+                    u.voter_profile.territorial_unit_id
+                    for u in users
+                    if getattr(u, "voter_profile", None)
+                    and u.voter_profile.territorial_unit_id
+                }
+            )
             ids = ", ".join(f"{u.pk}:{u.email}" for u in users)
             self.stdout.write(
-                f"  keep={users[0].pk} | {name} | unit={unit_id} | "
+                f"  keep={users[0].pk} | {name} | units={units} | "
                 f"ur={births} | {ids}"
             )
         if len(groups) > show:

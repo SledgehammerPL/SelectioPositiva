@@ -68,6 +68,14 @@ class VoterProfile(models.Model):
             self.user.email or str(self.user_id)
         )
 
+    def residence_municipality_name(self) -> str | None:
+        """Nazwa gminy zamieszkania (przodek kind=municipality), o ile jest."""
+        unit = self.territorial_unit
+        if unit is None:
+            return None
+        gmina = _ancestor_of_kind(unit, TerritorialUnit.Kind.MUNICIPALITY)
+        return gmina.name if gmina is not None else None
+
     def can_vote(self) -> bool:
         """Głosować może tylko użytkownik przypisany do obwodu."""
         unit = self.territorial_unit
