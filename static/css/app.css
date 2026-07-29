@@ -635,8 +635,15 @@ h2 {
 
 .candidate-request-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) 9.5rem;
   gap: 0.75rem;
+  align-items: end;
+}
+
+.candidate-request-birth input {
+  width: 100%;
+  min-width: 0;
+  padding-inline: 0.45rem;
 }
 
 .auth-alt {

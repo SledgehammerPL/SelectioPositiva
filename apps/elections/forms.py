@@ -9,6 +9,14 @@ class CandidateRequestForm(forms.Form):
             attrs={"placeholder": "Imię", "autocomplete": "given-name"}
         ),
     )
+    second_name = forms.CharField(
+        label="Drugie imię",
+        max_length=150,
+        required=False,
+        widget=forms.TextInput(
+            attrs={"placeholder": "opcjonalnie", "autocomplete": "additional-name"}
+        ),
+    )
     last_name = forms.CharField(
         label="Nazwisko",
         max_length=150,
@@ -34,6 +42,9 @@ class CandidateRequestForm(forms.Form):
 
     def clean_first_name(self) -> str:
         return (self.cleaned_data.get("first_name") or "").strip()
+
+    def clean_second_name(self) -> str:
+        return (self.cleaned_data.get("second_name") or "").strip()
 
     def clean_last_name(self) -> str:
         return (self.cleaned_data.get("last_name") or "").strip()

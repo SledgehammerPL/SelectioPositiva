@@ -102,10 +102,14 @@
           {{ candidate_request_form.first_name }}
         </label>
         <label class="field">
+          <span>{{ candidate_request_form.second_name.label }}</span>
+          {{ candidate_request_form.second_name }}
+        </label>
+        <label class="field">
           <span>{{ candidate_request_form.last_name.label }}</span>
           {{ candidate_request_form.last_name }}
         </label>
-        <label class="field">
+        <label class="field candidate-request-birth">
           <span>{{ candidate_request_form.birth_date.label }}</span>
           {{ candidate_request_form.birth_date }}
         </label>

@@ -20,6 +20,7 @@ def request_candidate_user(
     first_name: str,
     last_name: str,
     birth_date: date,
+    second_name: str = "",
     note: str = "",
 ) -> tuple[User, bool]:
     """
@@ -29,35 +30,43 @@ def request_candidate_user(
     admin uzupełnia dane i zatwierdza.
     """
     first = (first_name or "").strip()
+    second = (second_name or "").strip()
     last = (last_name or "").strip()
     note = (note or "").strip()
 
-    existing = (
-        User.objects.filter(
-            first_name__iexact=first,
-            last_name__iexact=last,
-            voter_profile__birth_date=birth_date,
-        )
-        .select_related("voter_profile")
-        .order_by("id")
-        .first()
-    )
+    qs = User.objects.filter(
+        first_name__iexact=first,
+        last_name__iexact=last,
+        voter_profile__birth_date=birth_date,
+    ).select_related("voter_profile")
+    if second:
+        qs = qs.filter(voter_profile__second_name__iexact=second)
+    existing = qs.order_by("id").first()
     if existing is not None:
         profile = getattr(existing, "voter_profile", None)
         if profile is None:
             profile = VoterProfile.objects.create(
                 user=existing,
+                second_name=second,
                 birth_date=birth_date,
                 is_approved=False,
                 requested_by=requested_by,
                 request_note=note,
             )
             return existing, True
-        if not profile.is_approved and note and not profile.request_note:
-            profile.request_note = note
+        if not profile.is_approved:
+            updates: list[str] = []
+            if second and not profile.second_name:
+                profile.second_name = second
+                updates.append("second_name")
+            if note and not profile.request_note:
+                profile.request_note = note
+                updates.append("request_note")
             if profile.requested_by_id is None:
                 profile.requested_by = requested_by
-            profile.save(update_fields=["request_note", "requested_by"])
+                updates.append("requested_by")
+            if updates:
+                profile.save(update_fields=updates)
         return existing, False
 
     user = User(
@@ -80,6 +89,7 @@ def request_candidate_user(
 
     VoterProfile.objects.create(
         user=user,
+        second_name=second,
         birth_date=birth_date,
         territorial_unit=precinct,
         is_approved=False,

@@ -354,6 +354,7 @@ def request_candidate(request: HttpRequest, slug: str) -> HttpResponse:
     user, created = request_candidate_user(
         requested_by=request.user,
         first_name=form.cleaned_data["first_name"],
+        second_name=form.cleaned_data.get("second_name") or "",
         last_name=form.cleaned_data["last_name"],
         birth_date=form.cleaned_data["birth_date"],
         note=form.cleaned_data.get("note") or "",
