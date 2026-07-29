@@ -175,33 +175,13 @@
       </div>
       <p class="hint">* Remis na progu mandatowym (równa siła ścieżek p[A,B] = p[B,A]).</p>
 
-      <details class="pairwise-accordion">
-        <summary>Macierz pojedynków pairwise (d[A,B])</summary>
-        <div class="table-wrap pairwise-wrap">
-          <table class="pairwise-table">
-            <thead>
-              <tr>
-                <th>A \\ B</th>
-                {% for row in pairwise_grid %}
-                <th title="{{ row.name }}">{{ row.name|truncatechars:12 }}</th>
-                {% endfor %}
-              </tr>
-            </thead>
-            <tbody>
-              {% for row in pairwise_grid %}
-              <tr>
-                <th title="{{ row.name }}">{{ row.name|truncatechars:16 }}</th>
-                {% for cell in row.cells %}
-                <td class="{% if cell.value is None %}cell-diag{% elif cell.win %}cell-win{% elif cell.value < cell.opp %}cell-lose{% endif %}">
-                  {% if cell.value is None %}—{% else %}{{ cell.value }}{% endif %}
-                </td>
-                {% endfor %}
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-      </details>
+      {% if pairwise_csv_url %}
+      <p class="results-download">
+        <a class="btn btn-ghost btn-sm" href="{{ pairwise_csv_url }}">
+          Pobierz macierz pojedynków (CSV)
+        </a>
+      </p>
+      {% endif %}
     </section>
     {% elif districts %}
     <p class="empty">Wybierz okręg z listy po lewej, aby zobaczyć wynik Schulzego.</p>

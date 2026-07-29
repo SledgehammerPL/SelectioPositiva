@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import csv
+import io
 from datetime import date
+from urllib.parse import urlencode
 
 from django.contrib import messages
 from django.contrib.auth import get_user_model
@@ -479,6 +482,36 @@ def _enrich_result_rows_tooltip(rows: list) -> list:
     return rows
 
 
+def _pairwise_csv_response(district: ElectoralDistrict, result_payload: dict | None) -> HttpResponse:
+    """CSV macierzy d[A,B]: wiersze = A, kolumny = B, przekątna pusta."""
+    payload = result_payload or {}
+    pairwise = (payload.get("schulze") or {}).get("pairwise") or {}
+    labels = payload.get("user_labels") or {}
+    candidate_ids = (payload.get("schulze") or {}).get("candidate_ids") or []
+
+    def _label(cid) -> str:
+        return str(labels.get(str(cid), cid))
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["A \\ B", *(_label(b) for b in candidate_ids)])
+    for a in candidate_ids:
+        row = [_label(a)]
+        for b in candidate_ids:
+            if a == b:
+                row.append("")
+            else:
+                row.append(int(pairwise.get(str(a), {}).get(str(b), 0)))
+        writer.writerow(row)
+
+    # UTF-8 BOM — Excel w PL otwiera polskie znaki poprawnie.
+    content = "\ufeff" + buf.getvalue()
+    response = HttpResponse(content, content_type="text/csv; charset=utf-8")
+    filename = f"pairwise-{district.slug}.csv"
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
+
+
 def results(request: HttpRequest) -> HttpResponse:
     """
     Publiczne wyniki Schulzego wg poziomu terytorialnego:
@@ -568,6 +601,8 @@ def results(request: HttpRequest) -> HttpResponse:
     result_payload = None
     if selected_district is not None:
         result_payload = get_cached_result(selected_district)
+        if request.GET.get("download") == "pairwise":
+            return _pairwise_csv_response(selected_district, result_payload)
 
     ranking_rows = _enrich_result_rows_tooltip(
         (result_payload or {}).get("ranking") or []
@@ -579,26 +614,21 @@ def results(request: HttpRequest) -> HttpResponse:
         (result_payload or {}).get("remaining") or []
     )
     turnout = (result_payload or {}).get("turnout") or {}
-    pairwise = (result_payload or {}).get("schulze", {}).get("pairwise") or {}
     labels = (result_payload or {}).get("user_labels") or {}
-    candidate_ids = (result_payload or {}).get("schulze", {}).get("candidate_ids") or []
     seats_count = (
         selected_district.seats_count
         if selected_district
         else (result_payload or {}).get("district", {}).get("seats_count", 1)
     )
 
-    pairwise_grid = []
-    for a in candidate_ids:
-        row = {"id": a, "name": labels.get(str(a), str(a)), "cells": []}
-        for b in candidate_ids:
-            if a == b:
-                row["cells"].append({"value": None, "opp": None, "win": False})
-            else:
-                ab = int(pairwise.get(str(a), {}).get(str(b), 0))
-                ba = int(pairwise.get(str(b), {}).get(str(a), 0))
-                row["cells"].append({"value": ab, "opp": ba, "win": ab > ba})
-        pairwise_grid.append(row)
+    pairwise_csv_url = None
+    if selected_district is not None:
+        params = {
+            k: v for k, v in request.GET.items() if k != "download" and v
+        }
+        params["district"] = selected_district.slug
+        params["download"] = "pairwise"
+        pairwise_csv_url = f"{reverse('results')}?{urlencode(params)}"
 
     level_labels = {
         TerritorialUnit.Kind.COUNTRY: "wybory krajowe",
@@ -634,7 +664,7 @@ def results(request: HttpRequest) -> HttpResponse:
             "remaining_rows": remaining_rows,
             "seats_count": seats_count,
             "turnout": turnout,
-            "pairwise_grid": pairwise_grid,
+            "pairwise_csv_url": pairwise_csv_url,
             "user_labels": labels,
         },
     )

@@ -1077,17 +1077,14 @@ h2 {
   overflow-x: auto;
 }
 
-.results-table,
-.pairwise-table {
+.results-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.92rem;
 }
 
 .results-table th,
-.results-table td,
-.pairwise-table th,
-.pairwise-table td {
+.results-table td {
   padding: 0.65rem 0.75rem;
   border-bottom: 1px solid var(--line);
   text-align: left;
@@ -1097,48 +1094,8 @@ h2 {
   background: rgba(31, 111, 74, 0.1);
 }
 
-.pairwise-accordion {
+.results-download {
   margin-top: 1.25rem;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 0.75rem 1rem;
-  background: rgba(243, 247, 243, 0.6);
-}
-
-.pairwise-accordion summary {
-  cursor: pointer;
-  font-weight: 700;
-  font-family: var(--font-display);
-}
-
-.pairwise-wrap {
-  margin-top: 0.75rem;
-}
-
-.pairwise-table th,
-.pairwise-table td {
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-}
-
-.pairwise-table th:first-child,
-.pairwise-table td:first-child,
-.pairwise-table tbody th {
-  text-align: left;
-}
-
-.cell-diag {
-  background: rgba(20, 32, 27, 0.05);
-  color: var(--ink-soft);
-}
-
-.cell-win {
-  background: rgba(31, 111, 74, 0.18);
-  font-weight: 700;
-}
-
-.cell-lose {
-  color: var(--ink-soft);
 }
 
 .office-list.compact {
