@@ -442,13 +442,13 @@ def clear_ballot(request: HttpRequest, slug: str) -> HttpResponse:
     return redirect("dashboard")
 
 
-@login_required
 def results(request: HttpRequest) -> HttpResponse:
     """
-    Wyniki Schulzego wg poziomu terytorialnego:
+    Publiczne wyniki Schulzego wg poziomu terytorialnego:
     kraj → wybory krajowe; +woj. → sejmik; +powiat → powiatowe; +gmina → gminne.
+    Nie wymaga logowania i nie ogranicza się do okręgów użytkownika.
     """
-    profile = get_voter_profile(request.user)
+    profile = get_voter_profile(request.user) if request.user.is_authenticated else None
 
     countries = list(
         TerritorialUnit.objects.filter(kind=TerritorialUnit.Kind.COUNTRY).order_by(
