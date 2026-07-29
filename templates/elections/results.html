@@ -1,45 +1,97 @@
 {% extends "base.html" %}
 
-{% block title %}Twoje wyniki — Selectio Positiva{% endblock %}
+{% block title %}Wyniki — Selectio Positiva{% endblock %}
 
 {% block content %}
 <section class="results-hero">
   <p class="eyebrow">Metoda Schulzego · beatpath</p>
-  <h1>Twoje wyniki</h1>
+  <h1>Wyniki</h1>
   <p class="lede">
-    Rankingi tylko w okręgach, w których możesz głosować
-    {% if profile and profile.territorial_unit %}
-    ({{ profile.territorial_unit }}).
-    {% else %}
-    — najpierw ustaw obwód w panelu.
-    {% endif %}
+    Wybierz terytorium: kraj (wybory krajowe), województwo (sejmik),
+    powiat (rada powiatu) albo gminę (rada gminy / wójt).
+    Wyniki są w podziale na okręgi.
   </p>
 </section>
 
-{% if not districts %}
-<p class="empty">
-  Brak okręgów dla Twojego obwodu.
-  <a href="{% url 'change_station' %}">Wybierz komisję</a>
-  lub wróć do <a href="{% url 'dashboard' %}">panelu</a>.
-</p>
-{% else %}
 <section class="results-layout">
   <aside class="results-filters">
-    <h2 class="results-nav-title">Twoje okręgi</h2>
+    <h2 class="results-nav-title">Terytorium</h2>
+    <form method="get" class="filter-form" id="results-filter-form">
+      <label class="field">
+        <span>Kraj</span>
+        <select name="country" id="results-country">
+          {% for c in countries %}
+          <option value="{{ c.pk }}" {% if selected_country and selected_country.pk == c.pk %}selected{% endif %}>{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <label class="field">
+        <span>Województwo</span>
+        <select name="voivodeship" id="results-voivodeship">
+          <option value="">— tylko kraj —</option>
+          {% for v in voivodeships %}
+          <option value="{{ v.pk }}" {% if selected_voivodeship and selected_voivodeship.pk == v.pk %}selected{% endif %}>{{ v.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <label class="field">
+        <span>Powiat / miasto</span>
+        <select name="county" id="results-county" {% if not selected_voivodeship %}disabled{% endif %}>
+          <option value="">— cały obszar woj. —</option>
+          {% for u in counties %}
+          <option value="{{ u.pk }}" {% if selected_county and selected_county.pk == u.pk %}selected{% endif %}>
+            {% if u.kind == "municipality" %}m. {% endif %}{{ u.name }}
+          </option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <label class="field">
+        <span>Gmina</span>
+        <select name="municipality" id="results-municipality" {% if not municipalities %}disabled{% endif %}>
+          <option value="">— cały powiat —</option>
+          {% for m in municipalities %}
+          <option value="{{ m.pk }}" {% if selected_municipality and selected_municipality.pk == m.pk %}selected{% endif %}>{{ m.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </form>
+
+    {% if selected_unit %}
+    <p class="results-level-hint">
+      Poziom: <strong>{{ level_label }}</strong>
+      <br>{{ selected_unit.get_kind_display }}: {{ selected_unit.name }}
+    </p>
+    {% endif %}
+
+    <h2 class="results-nav-title results-nav-districts">Okręgi</h2>
+    {% if district_groups %}
     <ul class="office-list compact results-district-nav">
-      {% for d in districts %}
-      <li class="office-row {% if selected_district and selected_district.pk == d.pk %}is-active{% endif %}">
-        <div class="office-meta">
-          <h3>{{ d.office.name }}</h3>
-          <p class="office-scope">{{ d.name }} · {{ d.seats_count }} mand.</p>
-        </div>
-        <a class="btn {% if selected_district and selected_district.pk == d.pk %}btn-primary{% else %}btn-secondary{% endif %}"
-           href="{% url 'results' %}?district={{ d.slug }}">
-          {% if selected_district and selected_district.pk == d.pk %}Wybrane{% else %}Wynik{% endif %}
-        </a>
+      {% for group in district_groups %}
+      <li class="results-office-group">
+        <p class="results-office-name">{{ group.office.name }}</p>
+        <ul class="results-district-sublist">
+          {% for d in group.districts %}
+          <li class="office-row {% if selected_district and selected_district.pk == d.pk %}is-active{% endif %}">
+            <div class="office-meta">
+              <h3>{{ d.name }}</h3>
+              <p class="office-scope">{{ d.seats_count }} mand.</p>
+            </div>
+            <a class="btn {% if selected_district and selected_district.pk == d.pk %}btn-primary{% else %}btn-secondary{% endif %}"
+               href="?country={{ selected_country.pk }}{% if selected_voivodeship %}&voivodeship={{ selected_voivodeship.pk }}{% endif %}{% if selected_county %}&county={{ selected_county.pk }}{% endif %}{% if selected_municipality %}&municipality={{ selected_municipality.pk }}{% endif %}&district={{ d.slug }}">
+              {% if selected_district and selected_district.pk == d.pk %}Wybrane{% else %}Wynik{% endif %}
+            </a>
+          </li>
+          {% endfor %}
+        </ul>
       </li>
       {% endfor %}
     </ul>
+    {% else %}
+    <p class="empty">Brak okręgów na tym poziomie dla wybranego terytorium.</p>
+    {% endif %}
   </aside>
 
   <div class="results-main">
@@ -151,10 +203,45 @@
         </div>
       </details>
     </section>
-    {% else %}
+    {% elif districts %}
     <p class="empty">Wybierz okręg z listy po lewej, aby zobaczyć wynik Schulzego.</p>
+    {% else %}
+    <p class="empty">Ustaw terytorium po lewej — pojawią się okręgi na tym poziomie.</p>
     {% endif %}
   </div>
 </section>
-{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  document.addEventListener('DOMContentLoaded', () => {
+    const form = document.getElementById('results-filter-form');
+    if (!form) return;
+    const country = document.getElementById('results-country');
+    const voi = document.getElementById('results-voivodeship');
+    const county = document.getElementById('results-county');
+    const muni = document.getElementById('results-municipality');
+
+    const submitCleared = (keep) => {
+      // Czyść głębsze poziomy przy zmianie nadrzędnego.
+      if (!keep.voi && voi) voi.value = '';
+      if (!keep.county && county) county.value = '';
+      if (!keep.muni && muni) muni.value = '';
+      form.submit();
+    };
+
+    if (country) {
+      country.addEventListener('change', () => submitCleared({}));
+    }
+    if (voi) {
+      voi.addEventListener('change', () => submitCleared({ voi: true }));
+    }
+    if (county) {
+      county.addEventListener('change', () => submitCleared({ voi: true, county: true }));
+    }
+    if (muni) {
+      muni.addEventListener('change', () => form.submit());
+    }
+  });
+</script>
 {% endblock %}

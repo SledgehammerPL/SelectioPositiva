@@ -6,7 +6,6 @@ import hashlib
 from typing import Any
 
 from django.contrib.auth import get_user_model
-from django.db.models import Count
 from django.utils import timezone
 
 from elections.models import (
@@ -229,68 +228,137 @@ def recompute_all_results() -> int:
     return count
 
 
-def districts_for_filter(
-    *,
-    kind: str | None = None,
-    unit_id: int | None = None,
-    office_id: int | None = None,
-    office_slug: str | None = None,
-) -> list[ElectoralDistrict]:
-    """
-    Lista okręgów do filtra wyników.
+# Poziom wyników ≠ zawsze candidacy_level (WBP ma candidacy=country, a wybory są gminne).
+_RESULT_LEVEL_BY_OFFICE_SLUG: dict[str, str] = {
+    "prezydent-rp": TerritorialUnit.Kind.COUNTRY,
+    "eurodeputowany": TerritorialUnit.Kind.COUNTRY,
+    "posel-sejm": TerritorialUnit.Kind.COUNTRY,
+    "senator": TerritorialUnit.Kind.COUNTRY,
+    "radny-sejmiku": TerritorialUnit.Kind.VOIVODESHIP,
+    "radny-powiatu": TerritorialUnit.Kind.COUNTY,
+    "radny-gminy": TerritorialUnit.Kind.MUNICIPALITY,
+    "wojt-burmistrz-prezydent": TerritorialUnit.Kind.MUNICIPALITY,
+}
 
-    Bez urzędu ani jednostki — pusta lista (nie ładujemy dziesiątek tysięcy
-    okręgów PKW na start).
-    """
-    if not office_id and not office_slug and not unit_id:
-        return []
-
-    qs = ElectoralDistrict.objects.select_related("office").annotate(
-        _ballot_count=Count("ballots")
-    )
-    if kind:
-        qs = qs.filter(territorial_units__kind=kind)
-    if unit_id:
-        qs = qs.filter(territorial_units__pk=unit_id)
-    if office_id:
-        qs = qs.filter(office_id=office_id)
-    if office_slug:
-        qs = qs.filter(office__slug=office_slug)
-    return list(qs.order_by("office__display_order", "display_order", "name").distinct())
+_RESULTS_FILTER_KINDS = (
+    TerritorialUnit.Kind.COUNTRY,
+    TerritorialUnit.Kind.VOIVODESHIP,
+    TerritorialUnit.Kind.COUNTY,
+    TerritorialUnit.Kind.MUNICIPALITY,
+)
 
 
-def filter_units_for_results(*, kind: str | None = None) -> list[TerritorialUnit]:
-    """
-    Opcje selecta „Jednostka”: bez obwodów; przy braku kind — tylko województwa.
-    """
-    effective_kind = kind or TerritorialUnit.Kind.VOIVODESHIP
-    if effective_kind == TerritorialUnit.Kind.PRECINCT:
-        return []
-    return list(
-        TerritorialUnit.objects.filter(
-            kind=effective_kind,
-            electoral_districts__isnull=False,
+def result_level_for_office(office: Office) -> str | None:
+    if office.slug in _RESULT_LEVEL_BY_OFFICE_SLUG:
+        return _RESULT_LEVEL_BY_OFFICE_SLUG[office.slug]
+    if office.candidacy_level_id:
+        return office.candidacy_level.slug
+    return None
+
+
+def offices_for_results_level(kind: str) -> list[Office]:
+    """Urzędy, których wyniki pokazujemy na danym poziomie hierarchii."""
+    slugs = [
+        slug for slug, level in _RESULT_LEVEL_BY_OFFICE_SLUG.items() if level == kind
+    ]
+    if not slugs:
+        return list(
+            Office.objects.filter(candidacy_level__slug=kind).order_by(
+                "display_order", "name"
+            )
         )
-        .distinct()
-        .order_by("name")
-        .only("id", "name", "kind", "slug")
-    )
-
-def offices_for_unit_filter(
-    *,
-    kind: str | None = None,
-    unit_id: int | None = None,
-) -> list[Office]:
-    """Urzędy mające okręgi w danym filtrze terytorialnym."""
-    if not kind and not unit_id:
-        return list(Office.objects.order_by("display_order", "name"))
-
-    district_qs = ElectoralDistrict.objects.all()
-    if kind:
-        district_qs = district_qs.filter(territorial_units__kind=kind)
-    if unit_id:
-        district_qs = district_qs.filter(territorial_units__pk=unit_id)
-    office_ids = district_qs.values_list("office_id", flat=True).distinct()
     return list(
-        Office.objects.filter(pk__in=office_ids).order_by("display_order", "name")
+        Office.objects.filter(slug__in=slugs).order_by("display_order", "name")
     )
+
+
+def _district_covers_unit_q(unit: TerritorialUnit):
+    """
+    Okręg „należy” do jednostki, gdy ma powiązanie z nią, jej potomkiem
+    albo jej przodkiem (do 3 poziomów w dół — kraj→…→obwód).
+    """
+    from django.db.models import Q
+
+    ancestor_ids = [u.pk for u in unit.get_ancestors(include_self=True)]
+    q = Q(territorial_units__pk__in=ancestor_ids)
+    q |= Q(territorial_units=unit)
+    q |= Q(territorial_units__parent=unit)
+    q |= Q(territorial_units__parent__parent=unit)
+    q |= Q(territorial_units__parent__parent__parent=unit)
+    return q
+
+
+def districts_for_results_unit(unit: TerritorialUnit) -> list[ElectoralDistrict]:
+    """
+    Okręgi wyborów na poziomie `unit.kind`, w zasięgu wybranej jednostki.
+
+    Kraj → wybory krajowe (prezydent, Sejm, Senat, PE).
+    Województwo → sejmik (okręgi w tym województwie).
+    Powiat → rada powiatu / dzielnicy.
+    Gmina → rada gminy + wójt/burmistrz/prezydent.
+    """
+    if unit.kind not in _RESULTS_FILTER_KINDS:
+        return []
+
+    offices = offices_for_results_level(unit.kind)
+    if not offices:
+        return []
+
+    office_ids = [o.pk for o in offices]
+    qs = (
+        ElectoralDistrict.objects.filter(office_id__in=office_ids)
+        .select_related("office", "office__candidacy_level")
+        .order_by("office__display_order", "display_order", "name")
+    )
+
+    if unit.kind == TerritorialUnit.Kind.COUNTRY:
+        # Wszystkie okręgi wyborów krajowych (np. 41 sejmowych).
+        return list(qs.distinct())
+
+    return list(qs.filter(_district_covers_unit_q(unit)).distinct())
+
+
+def group_districts_by_office(
+    districts: list[ElectoralDistrict],
+) -> list[dict[str, Any]]:
+    groups: list[dict[str, Any]] = []
+    by_office: dict[int, dict[str, Any]] = {}
+    for district in districts:
+        office = district.office
+        bucket = by_office.get(office.pk)
+        if bucket is None:
+            bucket = {"office": office, "districts": []}
+            by_office[office.pk] = bucket
+            groups.append(bucket)
+        bucket["districts"].append(district)
+    return groups
+
+
+def child_units_for_results(parent: TerritorialUnit) -> list[TerritorialUnit]:
+    """Dzieci do selectów wyników (woj. → powiaty + gminy na prawach powiatu)."""
+    if parent.kind == TerritorialUnit.Kind.COUNTRY:
+        return list(
+            TerritorialUnit.objects.filter(
+                parent=parent, kind=TerritorialUnit.Kind.VOIVODESHIP
+            ).order_by("name")
+        )
+    if parent.kind == TerritorialUnit.Kind.VOIVODESHIP:
+        counties = list(
+            TerritorialUnit.objects.filter(
+                parent=parent, kind=TerritorialUnit.Kind.COUNTY
+            ).order_by("name")
+        )
+        cities = list(
+            TerritorialUnit.objects.filter(
+                parent=parent, kind=TerritorialUnit.Kind.MUNICIPALITY
+            ).order_by("name")
+        )
+        return counties + cities
+    if parent.kind == TerritorialUnit.Kind.COUNTY:
+        return list(
+            TerritorialUnit.objects.filter(
+                parent=parent, kind=TerritorialUnit.Kind.MUNICIPALITY
+            ).order_by("name")
+        )
+    return []
+

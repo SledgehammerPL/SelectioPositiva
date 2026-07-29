@@ -32,9 +32,13 @@ from elections.services import (
 )
 from elections.services.eligibility import (
     district_units_at_level,
-    get_eligible_districts,
     user_age_on,
     user_may_run_in_district,
+)
+from elections.services.results import (
+    child_units_for_results,
+    districts_for_results_unit,
+    group_districts_by_office,
 )
 from geo.models import TerritorialUnit
 from users.forms import EmailAuthenticationForm
@@ -440,9 +444,83 @@ def clear_ballot(request: HttpRequest, slug: str) -> HttpResponse:
 
 @login_required
 def results(request: HttpRequest) -> HttpResponse:
-    """Wyniki Schulzego wyłącznie dla okręgów dostępnych zalogowanemu użytkownikowi."""
+    """
+    Wyniki Schulzego wg poziomu terytorialnego:
+    kraj → wybory krajowe; +woj. → sejmik; +powiat → powiatowe; +gmina → gminne.
+    """
     profile = get_voter_profile(request.user)
-    districts = list(get_eligible_districts(request.user))
+
+    countries = list(
+        TerritorialUnit.objects.filter(kind=TerritorialUnit.Kind.COUNTRY).order_by(
+            "name"
+        )
+    )
+    poland = next((c for c in countries if c.slug == "polska"), None)
+    if poland is None and countries:
+        poland = countries[0]
+
+    def _parse_unit(raw: str, *, kind: str, parent: TerritorialUnit | None = None):
+        raw = (raw or "").strip()
+        if not raw.isdigit():
+            return None
+        qs = TerritorialUnit.objects.filter(pk=int(raw), kind=kind)
+        if parent is not None:
+            qs = qs.filter(parent=parent)
+        return qs.first()
+
+    country = _parse_unit(
+        request.GET.get("country", ""), kind=TerritorialUnit.Kind.COUNTRY
+    )
+    if country is None:
+        country = poland
+
+    voivodeship = None
+    county = None  # powiat albo miasto na prawach powiatu (dla selecta)
+    municipality = None
+    if country is not None:
+        voivodeship = _parse_unit(
+            request.GET.get("voivodeship", ""),
+            kind=TerritorialUnit.Kind.VOIVODESHIP,
+            parent=country,
+        )
+    if voivodeship is not None:
+        raw_county = (request.GET.get("county", "") or "").strip()
+        if raw_county.isdigit():
+            county = (
+                TerritorialUnit.objects.filter(
+                    pk=int(raw_county),
+                    parent=voivodeship,
+                    kind__in=(
+                        TerritorialUnit.Kind.COUNTY,
+                        TerritorialUnit.Kind.MUNICIPALITY,
+                    ),
+                ).first()
+            )
+    if county is not None and county.kind == TerritorialUnit.Kind.COUNTY:
+        municipality = _parse_unit(
+            request.GET.get("municipality", ""),
+            kind=TerritorialUnit.Kind.MUNICIPALITY,
+            parent=county,
+        )
+
+    # Najgłębszy wybór wyznacza poziom wyników.
+    if municipality is not None:
+        selected_unit = municipality
+    elif county is not None:
+        selected_unit = county
+    else:
+        selected_unit = voivodeship or country
+
+    voivodeships = child_units_for_results(country) if country else []
+    counties = child_units_for_results(voivodeship) if voivodeship else []
+    municipalities: list[TerritorialUnit] = []
+    if county is not None and county.kind == TerritorialUnit.Kind.COUNTY:
+        municipalities = child_units_for_results(county)
+
+    districts = (
+        districts_for_results_unit(selected_unit) if selected_unit is not None else []
+    )
+    district_groups = group_districts_by_office(districts)
     district_by_slug = {d.slug: d for d in districts}
 
     district_slug = (request.GET.get("district") or "").strip()
@@ -479,12 +557,33 @@ def results(request: HttpRequest) -> HttpResponse:
                 row["cells"].append({"value": ab, "opp": ba, "win": ab > ba})
         pairwise_grid.append(row)
 
+    level_labels = {
+        TerritorialUnit.Kind.COUNTRY: "wybory krajowe",
+        TerritorialUnit.Kind.VOIVODESHIP: "wybory wojewódzkie",
+        TerritorialUnit.Kind.COUNTY: "wybory powiatowe",
+        TerritorialUnit.Kind.MUNICIPALITY: "wybory gminne",
+    }
+    level_label = (
+        level_labels.get(selected_unit.kind, "") if selected_unit is not None else ""
+    )
+
     return render(
         request,
         "elections/results.html",
         {
             "profile": profile,
+            "countries": countries,
+            "voivodeships": voivodeships,
+            "counties": counties,
+            "municipalities": municipalities,
+            "selected_country": country,
+            "selected_voivodeship": voivodeship,
+            "selected_county": county,
+            "selected_municipality": municipality,
+            "selected_unit": selected_unit,
+            "level_label": level_label,
             "districts": districts,
+            "district_groups": district_groups,
             "selected_district": selected_district,
             "result": result_payload,
             "ranking_rows": ranking_rows,

@@ -937,6 +937,42 @@ h2 {
   font-weight: 700;
 }
 
+.results-nav-districts {
+  margin-top: 1.35rem;
+  padding-top: 1rem;
+  border-top: 1px dashed var(--line);
+}
+
+.results-level-hint {
+  margin: 0.85rem 0 0;
+  font-size: 0.88rem;
+  color: var(--ink-soft);
+  line-height: 1.4;
+}
+
+.results-office-group {
+  list-style: none;
+  margin: 0 0 0.85rem;
+  padding: 0;
+}
+
+.results-office-name {
+  margin: 0 0 0.45rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.results-district-sublist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.55rem;
+}
+
 .results-district-nav {
   margin: 0;
   padding: 0;
