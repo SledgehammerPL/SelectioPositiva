@@ -63,6 +63,7 @@ a {
   gap: 1rem;
   padding: 1rem 1.5rem;
   border-bottom: 1px solid var(--line);
+  -webkit-backdrop-filter: blur(8px);
   backdrop-filter: blur(8px);
   background: rgba(243, 247, 243, 0.72);
   position: sticky;
@@ -427,6 +428,7 @@ h2 {
   border: 1px solid var(--line);
   border-radius: 12px;
   cursor: grab;
+  -webkit-user-select: none;
   user-select: none;
   transition: box-shadow 0.15s ease, border-color 0.15s ease;
 }
@@ -755,6 +757,60 @@ h2 {
   min-height: 1.25rem;
   font-size: 0.88rem;
   color: var(--ink-soft);
+}
+
+.candidate-tooltip {
+  position: fixed;
+  z-index: 80;
+  pointer-events: none;
+  padding: 0;
+}
+
+.candidate-tooltip-card {
+  width: 320px;
+  max-width: calc(100vw - 24px);
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: 0 16px 40px rgba(20, 32, 27, 0.18);
+  padding: 0.9rem;
+  display: grid;
+  grid-template-columns: 78px 1fr;
+  gap: 0.9rem;
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+
+.candidate-tooltip-photo {
+  width: 78px;
+  height: 95px;
+  border-radius: 12px;
+  background: rgba(31, 111, 74, 0.08);
+  border: 1px dashed var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.candidate-tooltip-photo-mock {
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+  text-align: center;
+  padding: 0 0.25rem;
+}
+
+.candidate-tooltip-name {
+  font-weight: 700;
+  color: var(--ink);
+  margin-top: 0.1rem;
+  margin-bottom: 0.35rem;
+}
+
+.candidate-tooltip-meta {
+  font-size: 0.92rem;
+  color: var(--ink-soft);
+  line-height: 1.35;
 }
 
 .candidate-search-panel,

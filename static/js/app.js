@@ -51,6 +51,59 @@
       let requestSeq = 0;
       let activeIndex = -1;
 
+      const tooltipEl = document.getElementById("candidate-tooltip");
+      let hoverTooltipId = null;
+      const tooltipNameEl = tooltipEl
+        ? tooltipEl.querySelector(".candidate-tooltip-name")
+        : null;
+      const tooltipMetaEl = tooltipEl
+        ? tooltipEl.querySelector(".candidate-tooltip-meta")
+        : null;
+
+      function hideTooltip() {
+        if (!tooltipEl) return;
+        hoverTooltipId = null;
+        tooltipEl.hidden = true;
+        tooltipEl.setAttribute("aria-hidden", "true");
+      }
+
+      function renderTooltipContent(c) {
+        if (!tooltipEl || !tooltipNameEl || !tooltipMetaEl || !c) return;
+        tooltipNameEl.textContent = c.name || "";
+
+        const parts = [];
+        if (c.birth_date) parts.push("ur. " + c.birth_date);
+        if (c.municipality) parts.push("zam. " + c.municipality);
+        if (c.second_name) parts.push("2. imię: " + c.second_name);
+        tooltipMetaEl.textContent =
+          parts.length ? parts.join(" · ") : "Szczegóły chwilowo niedostępne";
+      }
+
+      function moveTooltip(clientX, clientY) {
+        if (!tooltipEl) return;
+        // tooltipEl musi być widoczny, żeby w ogóle mieć sensowny width/height
+        if (tooltipEl.hidden) return;
+        const rect = tooltipEl.getBoundingClientRect();
+        const pad = 14;
+        const maxLeft = window.innerWidth - rect.width - pad;
+        const maxTop = window.innerHeight - rect.height - pad;
+        const left = Math.max(pad, Math.min(clientX + pad, maxLeft));
+        const top = Math.max(pad, Math.min(clientY + pad, maxTop));
+        tooltipEl.style.left = left + "px";
+        tooltipEl.style.top = top + "px";
+      }
+
+      function showTooltipForId(id, clientX, clientY) {
+        if (!tooltipEl) return;
+        const c = byId[id];
+        if (!c) return;
+        hoverTooltipId = id;
+        renderTooltipContent(c);
+        tooltipEl.hidden = false;
+        tooltipEl.setAttribute("aria-hidden", "false");
+        moveTooltip(clientX, clientY);
+      }
+
       (opts.ranked || []).forEach((c) => {
         byId[String(c.id)] = c;
       });
@@ -281,6 +334,24 @@
         addCandidate(c);
       });
 
+      if (tooltipEl) {
+        pool.addEventListener("mouseover", (e) => {
+          const item = e.target.closest(".ac-option");
+          if (!item) return;
+          const id = item.dataset.id;
+          if (!id) return;
+          if (hoverTooltipId !== id && byId[id]) {
+            showTooltipForId(id, e.clientX, e.clientY);
+            return;
+          }
+          if (hoverTooltipId === id) moveTooltip(e.clientX, e.clientY);
+        });
+        pool.addEventListener("mousemove", (e) => {
+          if (hoverTooltipId) moveTooltip(e.clientX, e.clientY);
+        });
+        pool.addEventListener("mouseleave", () => hideTooltip());
+      }
+
       rankList.addEventListener("click", (e) => {
         const btn = e.target.closest(".js-remove-rank");
         if (!btn) return;
@@ -291,6 +362,24 @@
         syncEmpty();
         scheduleSearch();
       });
+
+      if (tooltipEl) {
+        rankList.addEventListener("mouseover", (e) => {
+          const item = e.target.closest(".candidate-item");
+          if (!item) return;
+          const id = item.dataset.id;
+          if (!id) return;
+          if (hoverTooltipId !== id && byId[id]) {
+            showTooltipForId(id, e.clientX, e.clientY);
+            return;
+          }
+          if (hoverTooltipId === id) moveTooltip(e.clientX, e.clientY);
+        });
+        rankList.addEventListener("mousemove", (e) => {
+          if (hoverTooltipId) moveTooltip(e.clientX, e.clientY);
+        });
+        rankList.addEventListener("mouseleave", () => hideTooltip());
+      }
 
       function onFilterKeydown(e) {
         const items = pool.querySelectorAll(".ac-option");
