@@ -142,6 +142,20 @@ class Office(models.Model):
             "województwo = to samo województwo."
         ),
     )
+    results_visibility_level = models.ForeignKey(
+        "geo.TerritorialLevel",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="offices_for_results",
+        verbose_name="poziom widoczności wyników",
+        help_text=(
+            "Na jakim poziomie filtra wyników pokazujemy ten urząd. "
+            "Kraj = wybory wspólne dla całego kraju (np. prezydent); "
+            "województwo = Sejm/Senat/PE/sejmik w wybranym województwie; "
+            "powiat = rada powiatu; gmina = rada gminy i wójt/burmistrz/prezydent."
+        ),
+    )
     display_order = models.PositiveIntegerField("kolejność", default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

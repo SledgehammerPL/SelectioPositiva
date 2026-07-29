@@ -18,18 +18,18 @@ from elections.models import ElectoralDistrict, Office, Party, VoterProfile
 from geo.models import PollingStation, TerritorialLevel, TerritorialUnit
 from users.services.accounts import ensure_user
 
-# slug → (min_age, candidacy_level_slug)
+# slug → (min_age, candidacy_level_slug, results_visibility_slug)
 OFFICE_CONSTRAINTS = {
-    "prezydent-rp": (35, "country"),
-    "eurodeputowany": (21, "country"),
-    "posel-sejm": (21, "country"),
-    "senator": (30, "country"),
-    "prezydent-miasta": (18, "country"),
-    "wojt-burmistrz-prezydent": (18, "country"),
-    "radny-sejmiku": (18, "voivodeship"),
-    "radny-powiatu": (18, "county"),
-    "radny-gminy": (18, "municipality"),
-    "radny": (18, "municipality"),
+    "prezydent-rp": (35, "country", "country"),
+    "eurodeputowany": (21, "country", "voivodeship"),
+    "posel-sejm": (21, "country", "voivodeship"),
+    "senator": (30, "country", "voivodeship"),
+    "prezydent-miasta": (18, "country", "municipality"),
+    "wojt-burmistrz-prezydent": (18, "country", "municipality"),
+    "radny-sejmiku": (18, "voivodeship", "voivodeship"),
+    "radny-powiatu": (18, "county", "county"),
+    "radny-gminy": (18, "municipality", "municipality"),
+    "radny": (18, "municipality", "municipality"),
 }
 
 DEMO_EMAIL = "demo@selectio.local"
@@ -129,7 +129,9 @@ class Command(BaseCommand):
         ]
         offices: dict[str, Office] = {}
         for slug, name, desc, order in offices_data:
-            min_age, level_slug = OFFICE_CONSTRAINTS.get(slug, (18, "municipality"))
+            min_age, level_slug, results_slug = OFFICE_CONSTRAINTS.get(
+                slug, (18, "municipality", "municipality")
+            )
             office, _ = Office.objects.update_or_create(
                 slug=slug,
                 defaults={
@@ -139,6 +141,7 @@ class Command(BaseCommand):
                     "display_order": order,
                     "min_age": min_age,
                     "candidacy_level": levels.get(level_slug),
+                    "results_visibility_level": levels.get(results_slug),
                 },
             )
             offices[slug] = office

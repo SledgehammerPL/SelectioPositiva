@@ -24,7 +24,7 @@ from geo.pkw import (
 )
 
 OFFICES = [
-    # slug, name, description, order, min_age, candidacy_level_slug
+    # slug, name, description, order, min_age, candidacy_level, results_visibility
     (
         "eurodeputowany",
         "Poseł do Europarlamentu",
@@ -32,15 +32,33 @@ OFFICES = [
         2,
         21,
         "country",
+        "voivodeship",
     ),
-    ("posel-sejm", "Poseł na Sejm RP", "Okręgi sejmowe (PKW 2023).", 10, 21, "country"),
-    ("senator", "Senator RP", "Okręgi senackie (PKW 2023).", 20, 30, "country"),
+    (
+        "posel-sejm",
+        "Poseł na Sejm RP",
+        "Okręgi sejmowe (PKW 2023).",
+        10,
+        21,
+        "country",
+        "voivodeship",
+    ),
+    (
+        "senator",
+        "Senator RP",
+        "Okręgi senackie (PKW 2023).",
+        20,
+        30,
+        "country",
+        "voivodeship",
+    ),
     (
         "radny-sejmiku",
         "Radny sejmiku województwa",
         "Okręgi do sejmików (PKW samorząd 2024).",
         30,
         18,
+        "voivodeship",
         "voivodeship",
     ),
     (
@@ -50,6 +68,7 @@ OFFICES = [
         40,
         18,
         "county",
+        "county",
     ),
     (
         "radny-gminy",
@@ -57,6 +76,7 @@ OFFICES = [
         "Okręgi do rad gmin i miast (PKW samorząd 2024).",
         50,
         18,
+        "municipality",
         "municipality",
     ),
     (
@@ -66,6 +86,7 @@ OFFICES = [
         60,
         18,
         "country",
+        "municipality",
     ),
 ]
 
@@ -351,7 +372,7 @@ class Command(BaseCommand):
     def _ensure_offices(self) -> dict[str, Office]:
         levels = {lvl.slug: lvl for lvl in TerritorialLevel.objects.all()}
         out: dict[str, Office] = {}
-        for slug, name, desc, order, min_age, level_slug in OFFICES:
+        for slug, name, desc, order, min_age, level_slug, results_slug in OFFICES:
             office, _ = Office.objects.update_or_create(
                 slug=slug,
                 defaults={
@@ -361,6 +382,7 @@ class Command(BaseCommand):
                     "display_order": order,
                     "min_age": min_age,
                     "candidacy_level": levels.get(level_slug),
+                    "results_visibility_level": levels.get(results_slug),
                 },
             )
             out[slug] = office

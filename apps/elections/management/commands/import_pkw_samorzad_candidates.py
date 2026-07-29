@@ -72,21 +72,38 @@ KIND_SPECS: dict[Kind, dict] = {
 }
 
 OFFICE_DEFAULTS = {
-    "radny-sejmiku": ("Radny sejmiku wojewodztwa", "Okregi sejmikow (PKW 2024).", 30, 18, "voivodeship"),
+    # slug → name, desc, order, min_age, candidacy_level, results_visibility
+    "radny-sejmiku": (
+        "Radny sejmiku wojewodztwa",
+        "Okregi sejmikow (PKW 2024).",
+        30,
+        18,
+        "voivodeship",
+        "voivodeship",
+    ),
     "radny-powiatu": (
         "Radny rady powiatu / dzielnicy",
         "Okregi rad powiatow i dzielnic m.st. Warszawy (PKW 2024).",
         40,
         18,
         "county",
+        "county",
     ),
-    "radny-gminy": ("Radny rady gminy / miasta", "Okregi rad gmin (PKW 2024).", 50, 18, "municipality"),
+    "radny-gminy": (
+        "Radny rady gminy / miasta",
+        "Okregi rad gmin (PKW 2024).",
+        50,
+        18,
+        "municipality",
+        "municipality",
+    ),
     "wojt-burmistrz-prezydent": (
         "Wojt / Burmistrz / Prezydent",
         "Wybory wojtow, burmistrzow i prezydentow (PKW 2024).",
         60,
         25,
         "country",
+        "municipality",
     ),
 }
 
@@ -97,7 +114,7 @@ def _email_for(cand: SamorzadCandidate, slug: str) -> str:
 
 def ensure_samorzad_offices() -> None:
     levels = {lv.slug: lv for lv in TerritorialLevel.objects.all()}
-    for slug, (name, desc, order, min_age, level_slug) in OFFICE_DEFAULTS.items():
+    for slug, (name, desc, order, min_age, cand_slug, results_slug) in OFFICE_DEFAULTS.items():
         Office.objects.update_or_create(
             slug=slug,
             defaults={
@@ -106,7 +123,8 @@ def ensure_samorzad_offices() -> None:
                 "is_open": True,
                 "display_order": order,
                 "min_age": min_age,
-                "candidacy_level": levels.get(level_slug),
+                "candidacy_level": levels.get(cand_slug),
+                "results_visibility_level": levels.get(results_slug),
             },
         )
 

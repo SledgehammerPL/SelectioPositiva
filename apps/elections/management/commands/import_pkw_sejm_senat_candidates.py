@@ -34,7 +34,9 @@ from geo.pkw import fetch_source
 
 
 def ensure_parliament_offices() -> dict[str, Office]:
-    level = TerritorialLevel.objects.filter(slug="country").first()
+    levels = {lv.slug: lv for lv in TerritorialLevel.objects.all()}
+    country = levels.get("country")
+    voi = levels.get("voivodeship")
     specs = (
         (
             "posel-sejm",
@@ -61,7 +63,8 @@ def ensure_parliament_offices() -> dict[str, Office]:
                 "is_open": True,
                 "display_order": order,
                 "min_age": min_age,
-                "candidacy_level": level,
+                "candidacy_level": country,
+                "results_visibility_level": voi,
             },
         )
         out[slug] = office

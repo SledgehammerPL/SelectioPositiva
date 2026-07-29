@@ -86,6 +86,7 @@ def ensure_prezydent_office() -> Office:
             "is_open": True,
             "min_age": 35,
             "candidacy_level": country_level,
+            "results_visibility_level": country_level,
             "display_order": 1,
         },
     )

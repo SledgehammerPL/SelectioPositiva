@@ -108,13 +108,14 @@ class OfficeAdmin(admin.ModelAdmin):
         "name",
         "min_age",
         "candidacy_level",
+        "results_visibility_level",
         "is_open",
         "display_order",
     )
-    list_filter = ("is_open", "candidacy_level")
+    list_filter = ("is_open", "candidacy_level", "results_visibility_level")
     search_fields = ("name", "slug")
     prepopulated_fields = {"slug": ("name",)}
-    autocomplete_fields = ("candidacy_level",)
+    autocomplete_fields = ("candidacy_level", "results_visibility_level")
 
 
 @admin.register(ElectoralDistrict)

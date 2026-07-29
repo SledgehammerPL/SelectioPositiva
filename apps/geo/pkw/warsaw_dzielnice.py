@@ -26,6 +26,7 @@ def ensure_radny_powiatu_office() -> Office:
             "display_order": 40,
             "min_age": 18,
             "candidacy_level": level,
+            "results_visibility_level": level,
         },
     )
     return office

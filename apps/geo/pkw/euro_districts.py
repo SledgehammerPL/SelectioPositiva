@@ -132,7 +132,7 @@ def _unit_ids_for_spec(spec: EuroDistrictSpec) -> list[int]:
 
 
 def ensure_euro_office() -> Office:
-    level = TerritorialLevel.objects.filter(slug="country").first()
+    levels = {lv.slug: lv for lv in TerritorialLevel.objects.all()}
     office, _ = Office.objects.update_or_create(
         slug="eurodeputowany",
         defaults={
@@ -141,7 +141,8 @@ def ensure_euro_office() -> Office:
             "is_open": True,
             "display_order": 2,
             "min_age": 21,
-            "candidacy_level": level,
+            "candidacy_level": levels.get("country"),
+            "results_visibility_level": levels.get("voivodeship"),
         },
     )
     return office

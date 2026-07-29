@@ -228,18 +228,7 @@ def recompute_all_results() -> int:
     return count
 
 
-# Poziom wyników ≠ zawsze candidacy_level (WBP ma candidacy=country, a wybory są gminne).
-_RESULT_LEVEL_BY_OFFICE_SLUG: dict[str, str] = {
-    "prezydent-rp": TerritorialUnit.Kind.COUNTRY,
-    "eurodeputowany": TerritorialUnit.Kind.COUNTRY,
-    "posel-sejm": TerritorialUnit.Kind.COUNTRY,
-    "senator": TerritorialUnit.Kind.COUNTRY,
-    "radny-sejmiku": TerritorialUnit.Kind.VOIVODESHIP,
-    "radny-powiatu": TerritorialUnit.Kind.COUNTY,
-    "radny-gminy": TerritorialUnit.Kind.MUNICIPALITY,
-    "wojt-burmistrz-prezydent": TerritorialUnit.Kind.MUNICIPALITY,
-}
-
+# Poziomy filtra wyników (bez obwodów).
 _RESULTS_FILTER_KINDS = (
     TerritorialUnit.Kind.COUNTRY,
     TerritorialUnit.Kind.VOIVODESHIP,
@@ -248,27 +237,12 @@ _RESULTS_FILTER_KINDS = (
 )
 
 
-def result_level_for_office(office: Office) -> str | None:
-    if office.slug in _RESULT_LEVEL_BY_OFFICE_SLUG:
-        return _RESULT_LEVEL_BY_OFFICE_SLUG[office.slug]
-    if office.candidacy_level_id:
-        return office.candidacy_level.slug
-    return None
-
-
 def offices_for_results_level(kind: str) -> list[Office]:
-    """Urzędy, których wyniki pokazujemy na danym poziomie hierarchii."""
-    slugs = [
-        slug for slug, level in _RESULT_LEVEL_BY_OFFICE_SLUG.items() if level == kind
-    ]
-    if not slugs:
-        return list(
-            Office.objects.filter(candidacy_level__slug=kind).order_by(
-                "display_order", "name"
-            )
-        )
+    """Urzędy widoczne w wynikach na danym poziomie (`results_visibility_level`)."""
     return list(
-        Office.objects.filter(slug__in=slugs).order_by("display_order", "name")
+        Office.objects.filter(results_visibility_level__slug=kind)
+        .select_related("results_visibility_level", "candidacy_level")
+        .order_by("display_order", "name")
     )
 
 
@@ -290,11 +264,11 @@ def _district_covers_unit_q(unit: TerritorialUnit):
 
 def districts_for_results_unit(unit: TerritorialUnit) -> list[ElectoralDistrict]:
     """
-    Okręgi wyborów na poziomie `unit.kind`, w zasięgu wybranej jednostki.
+    Okręgi urzędów z `results_visibility_level == unit.kind`, w zasięgu jednostki.
 
-    Kraj → wybory krajowe (prezydent, Sejm, Senat, PE).
-    Województwo → sejmik (okręgi w tym województwie).
-    Powiat → rada powiatu / dzielnicy.
+    Kraj → np. prezydent (wybory wspólne dla kraju).
+    Województwo → Sejm / Senat / PE / sejmik w tym województwie.
+    Powiat → rada powiatu.
     Gmina → rada gminy + wójt/burmistrz/prezydent.
     """
     if unit.kind not in _RESULTS_FILTER_KINDS:
@@ -307,12 +281,15 @@ def districts_for_results_unit(unit: TerritorialUnit) -> list[ElectoralDistrict]
     office_ids = [o.pk for o in offices]
     qs = (
         ElectoralDistrict.objects.filter(office_id__in=office_ids)
-        .select_related("office", "office__candidacy_level")
+        .select_related(
+            "office",
+            "office__candidacy_level",
+            "office__results_visibility_level",
+        )
         .order_by("office__display_order", "display_order", "name")
     )
 
     if unit.kind == TerritorialUnit.Kind.COUNTRY:
-        # Wszystkie okręgi wyborów krajowych (np. 41 sejmowych).
         return list(qs.distinct())
 
     return list(qs.filter(_district_covers_unit_q(unit)).distinct())
