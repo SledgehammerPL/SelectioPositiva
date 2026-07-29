@@ -13,7 +13,7 @@ class TerritorialLevelAdmin(admin.ModelAdmin):
 
 @admin.register(TerritorialUnit)
 class TerritorialUnitAdmin(admin.ModelAdmin):
-    list_display = ("name", "kind", "teryt", "parent", "center_lat", "center_lng")
+    list_display = ("name", "kind", "teryt", "parent")
     list_filter = ("kind",)
     search_fields = ("name", "slug", "teryt")
     prepopulated_fields = {"slug": ("name",)}
@@ -33,6 +33,4 @@ class PollingStationAdmin(admin.ModelAdmin):
         "precinct",
         "address",
         "streets_served",
-        "latitude",
-        "longitude",
     )

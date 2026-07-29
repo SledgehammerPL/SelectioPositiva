@@ -47,8 +47,6 @@ def _ensure_katowice_units() -> TerritorialUnit:
             "name": "Polska",
             "kind": TerritorialUnit.Kind.COUNTRY,
             "parent": None,
-            "center_lat": "52.100000",
-            "center_lng": "19.400000",
         },
     )
     slask, _ = TerritorialUnit.objects.get_or_create(
@@ -57,8 +55,6 @@ def _ensure_katowice_units() -> TerritorialUnit:
             "name": "Województwo Śląskie",
             "kind": TerritorialUnit.Kind.VOIVODESHIP,
             "parent": poland,
-            "center_lat": "50.250000",
-            "center_lng": "19.000000",
         },
     )
     gmina, _ = TerritorialUnit.objects.update_or_create(
@@ -67,8 +63,6 @@ def _ensure_katowice_units() -> TerritorialUnit:
             "name": "Gmina Katowice",
             "kind": TerritorialUnit.Kind.MUNICIPALITY,
             "parent": slask,
-            "center_lat": "50.264900",
-            "center_lng": "19.023800",
             "teryt": CITY_FILTERS["katowice"]["teryt"],
         },
     )

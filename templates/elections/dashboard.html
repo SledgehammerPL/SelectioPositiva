@@ -47,12 +47,6 @@
 {% endif %}
 
 {% if profile %}
-<section class="map-section" aria-label="Mapa terytorium wyborczego">
-  <div class="map-legend" id="map-legend"></div>
-  <div id="election-map" class="election-map"></div>
-  {{ map_payload_json|json_script:"map-payload" }}
-</section>
-
 <section class="offices-section">
   <header class="section-head">
     <h2>Dostępne karty do głosowania</h2>
@@ -109,14 +103,4 @@
 </section>
 {% endif %}
 {% endif %}
-{% endblock %}
-
-{% block extra_js %}
-<script>
-  document.addEventListener('DOMContentLoaded', () => {
-    if (window.SelectioMap) {
-      window.SelectioMap.init(document.getElementById('election-map'));
-    }
-  });
-</script>
 {% endblock %}

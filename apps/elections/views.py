@@ -204,12 +204,9 @@ def dashboard(request: HttpRequest) -> HttpResponse:
     )
     station_summary = request.session.pop("station_change_summary", None)
 
-    map_payload: dict = {"station": None, "units": []}
     display_station = None
     if profile is not None and profile.territorial_unit_id:
         unit = profile.territorial_unit
-        ancestors = unit.get_ancestors(include_self=True)
-        # Komisja tylko do wyświetlenia lokalizacji (nie jest w profilu).
         if unit.kind == TerritorialUnit.Kind.PRECINCT:
             from geo.models import PollingStation
 
@@ -218,45 +215,6 @@ def dashboard(request: HttpRequest) -> HttpResponse:
                 .order_by("number", "pk")
                 .first()
             )
-        map_payload = {
-            "station": (
-                {
-                    "name": display_station.name,
-                    "code": display_station.code,
-                    "address": display_station.address,
-                    "lat": float(display_station.latitude)
-                    if display_station.latitude is not None
-                    else None,
-                    "lng": float(display_station.longitude)
-                    if display_station.longitude is not None
-                    else None,
-                }
-                if display_station
-                else {
-                    "name": str(unit),
-                    "code": unit.slug,
-                    "address": "",
-                    "lat": float(unit.center_lat) if unit.center_lat is not None else None,
-                    "lng": float(unit.center_lng) if unit.center_lng is not None else None,
-                }
-            ),
-            "units": [
-                {
-                    "id": u.pk,
-                    "name": u.name,
-                    "kind": u.kind,
-                    "kind_label": u.get_kind_display(),
-                    "boundary": getattr(u, "boundary", None),
-                    "center_lat": float(u.center_lat)
-                    if getattr(u, "center_lat", None) is not None
-                    else None,
-                    "center_lng": float(u.center_lng)
-                    if getattr(u, "center_lng", None) is not None
-                    else None,
-                }
-                for u in ancestors
-            ],
-        }
 
     return render(
         request,
@@ -265,7 +223,6 @@ def dashboard(request: HttpRequest) -> HttpResponse:
             "profile": profile,
             "display_station": display_station,
             "statuses": statuses,
-            "map_payload_json": map_payload,
             "ballot_counts": ballot_counts,
             "voided_ballots": voided_ballots,
             "station_summary": station_summary,
@@ -497,59 +454,6 @@ def results(request: HttpRequest) -> HttpResponse:
     if selected_district is not None:
         result_payload = get_cached_result(selected_district)
 
-    map_payload: dict = {"station": None, "units": []}
-    if profile is not None and profile.territorial_unit_id:
-        unit = profile.territorial_unit
-        ancestors = unit.get_ancestors(include_self=True)
-        display_station = None
-        if unit.kind == TerritorialUnit.Kind.PRECINCT:
-            from geo.models import PollingStation
-
-            display_station = (
-                PollingStation.objects.filter(precinct=unit)
-                .order_by("number", "pk")
-                .first()
-            )
-        map_payload = {
-            "station": (
-                {
-                    "name": display_station.name,
-                    "code": display_station.code,
-                    "address": display_station.address,
-                    "lat": float(display_station.latitude)
-                    if display_station.latitude is not None
-                    else None,
-                    "lng": float(display_station.longitude)
-                    if display_station.longitude is not None
-                    else None,
-                }
-                if display_station
-                else {
-                    "name": str(unit),
-                    "code": unit.slug,
-                    "address": "",
-                    "lat": float(unit.center_lat) if unit.center_lat is not None else None,
-                    "lng": float(unit.center_lng) if unit.center_lng is not None else None,
-                }
-            ),
-            "units": [
-                {
-                    "id": u.pk,
-                    "name": u.name,
-                    "kind": u.kind,
-                    "kind_label": u.get_kind_display(),
-                    "boundary": getattr(u, "boundary", None),
-                    "center_lat": float(u.center_lat)
-                    if getattr(u, "center_lat", None) is not None
-                    else None,
-                    "center_lng": float(u.center_lng)
-                    if getattr(u, "center_lng", None) is not None
-                    else None,
-                }
-                for u in ancestors
-            ],
-        }
-
     ranking_rows = (result_payload or {}).get("ranking") or []
     elected_rows = (result_payload or {}).get("elected") or []
     remaining_rows = (result_payload or {}).get("remaining") or []
@@ -590,6 +494,5 @@ def results(request: HttpRequest) -> HttpResponse:
             "turnout": turnout,
             "pairwise_grid": pairwise_grid,
             "user_labels": labels,
-            "map_payload_json": map_payload,
         },
     )

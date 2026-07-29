@@ -296,46 +296,6 @@ h2 {
   animation: rise 0.4s ease both;
 }
 
-.map-section {
-  position: relative;
-  margin-bottom: 2rem;
-  animation: rise 0.55s ease both;
-}
-
-.election-map {
-  height: min(420px, 55vh);
-  border-radius: var(--radius);
-  border: 1px solid var(--line);
-  box-shadow: var(--shadow);
-  overflow: hidden;
-  background: #c9d6cc;
-}
-
-.map-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-bottom: 0.75rem;
-}
-
-.legend-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.35rem 0.7rem;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.7);
-  border: 1px solid var(--line);
-  font-size: 0.8rem;
-}
-
-.legend-swatch {
-  width: 0.7rem;
-  height: 0.7rem;
-  border-radius: 2px;
-  border: 1px solid rgba(0, 0, 0, 0.2);
-}
-
 .offices-section {
   animation: rise 0.65s ease both;
 }
@@ -1008,20 +968,6 @@ h2 {
   display: grid;
   gap: 1.25rem;
   min-width: 0;
-}
-
-.map-hint {
-  margin: 0.5rem 0 0;
-}
-
-.legend-chip-btn {
-  cursor: pointer;
-  font: inherit;
-}
-
-.legend-chip-btn.is-active {
-  border-color: var(--accent);
-  background: var(--accent-soft);
 }
 
 .result-panel {

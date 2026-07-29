@@ -259,32 +259,6 @@ def districts_for_filter(
     return list(qs.order_by("office__display_order", "display_order", "name").distinct())
 
 
-# Poziomy na mapie wyników (bez powiatów/gmin/obwodów — za dużo rekordów PKW).
-_RESULTS_MAP_KINDS = (
-    TerritorialUnit.Kind.COUNTRY,
-    TerritorialUnit.Kind.VOIVODESHIP,
-)
-
-
-def map_units_for_results(*, selected_unit: TerritorialUnit | None = None) -> list[TerritorialUnit]:
-    """
-    Jednostki na mapę wyników: kraj + województwa powiązane z okręgami.
-    """
-    qs = (
-        TerritorialUnit.objects.filter(
-            kind__in=_RESULTS_MAP_KINDS,
-            electoral_districts__isnull=False,
-        )
-        .annotate(offices_count=Count("electoral_districts", distinct=True))
-        .distinct()
-        .order_by("kind", "name")
-    )
-    units = list(qs)
-    if selected_unit and all(u.pk != selected_unit.pk for u in units):
-        selected_unit.offices_count = selected_unit.electoral_districts.count()  # type: ignore[attr-defined]
-        units.append(selected_unit)
-    return units
-
 def filter_units_for_results(*, kind: str | None = None) -> list[TerritorialUnit]:
     """
     Opcje selecta „Jednostka”: bez obwodów; przy braku kind — tylko województwa.

@@ -69,22 +69,6 @@ class TerritorialUnit(models.Model):
         related_name="children",
         verbose_name="jednostka nadrzędna",
     )
-    # GeoJSON Polygon / MultiPolygon (EPSG:4326) do rysowania granic na mapie.
-    boundary = models.JSONField("granica (GeoJSON)", null=True, blank=True)
-    center_lat = models.DecimalField(
-        "środek (szerokość)",
-        max_digits=9,
-        decimal_places=6,
-        null=True,
-        blank=True,
-    )
-    center_lng = models.DecimalField(
-        "środek (długość)",
-        max_digits=9,
-        decimal_places=6,
-        null=True,
-        blank=True,
-    )
 
     class Meta:
         verbose_name = "jednostka terytorialna"
@@ -139,20 +123,6 @@ class PollingStation(models.Model):
         "obsługiwane ulice",
         blank=True,
         help_text="Opis ulic / granic obwodu obsługiwanych przez komisję.",
-    )
-    latitude = models.DecimalField(
-        "szerokość geograficzna",
-        max_digits=9,
-        decimal_places=6,
-        null=True,
-        blank=True,
-    )
-    longitude = models.DecimalField(
-        "długość geograficzna",
-        max_digits=9,
-        decimal_places=6,
-        null=True,
-        blank=True,
     )
 
     class Meta:

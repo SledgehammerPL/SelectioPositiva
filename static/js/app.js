@@ -1,13 +1,6 @@
 (function () {
   "use strict";
 
-  const UNIT_STYLES = {
-    country: { color: "#1f6f4a", fillOpacity: 0.08, weight: 2 },
-    voivodeship: { color: "#2a7f9e", fillOpacity: 0.14, weight: 2 },
-    district: { color: "#b36b1b", fillOpacity: 0.2, weight: 2 },
-    municipality: { color: "#6b3fa0", fillOpacity: 0.28, weight: 2.5 },
-  };
-
   function renumber(listEl) {
     listEl.querySelectorAll(".candidate-item").forEach((item, idx) => {
       const num = item.querySelector(".rank-num");
@@ -74,21 +67,32 @@
         const parts = [];
         if (c.birth_date) parts.push("ur. " + c.birth_date);
         if (c.municipality) parts.push("zam. " + c.municipality);
-        if (c.second_name) parts.push("2. imię: " + c.second_name);
         tooltipMetaEl.textContent =
           parts.length ? parts.join(" · ") : "Szczegóły chwilowo niedostępne";
       }
 
       function moveTooltip(clientX, clientY) {
-        if (!tooltipEl) return;
-        // tooltipEl musi być widoczny, żeby w ogóle mieć sensowny width/height
-        if (tooltipEl.hidden) return;
+        if (!tooltipEl || tooltipEl.hidden) return;
         const rect = tooltipEl.getBoundingClientRect();
-        const pad = 14;
-        const maxLeft = window.innerWidth - rect.width - pad;
-        const maxTop = window.innerHeight - rect.height - pad;
-        const left = Math.max(pad, Math.min(clientX + pad, maxLeft));
-        const top = Math.max(pad, Math.min(clientY + pad, maxTop));
+        const pad = 8;
+        const gap = 10;
+        // Preferuj lewą stronę kursora (bliżej, nie wychodzi poza prawą krawędź).
+        let left = clientX - rect.width - gap;
+        let top = clientY + gap;
+        if (left < pad) {
+          left = clientX + gap;
+        }
+        if (top + rect.height > window.innerHeight - pad) {
+          top = clientY - rect.height - gap;
+        }
+        left = Math.max(
+          pad,
+          Math.min(left, window.innerWidth - rect.width - pad)
+        );
+        top = Math.max(
+          pad,
+          Math.min(top, window.innerHeight - rect.height - pad)
+        );
         tooltipEl.style.left = left + "px";
         tooltipEl.style.top = top + "px";
       }
@@ -447,174 +451,4 @@
     },
   };
 
-  window.SelectioMap = {
-    init(mapEl) {
-      if (!mapEl || typeof L === "undefined") return;
-
-      let payload;
-      try {
-        const node = document.getElementById("map-payload");
-        payload = node ? JSON.parse(node.textContent) : {};
-      } catch (e) {
-        console.error("Map payload parse error", e);
-        return;
-      }
-
-      const map = L.map(mapEl, {
-        scrollWheelZoom: false,
-        zoomControl: true,
-      });
-
-      L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
-        attribution:
-          '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
-        subdomains: "abcd",
-        maxZoom: 19,
-      }).addTo(map);
-
-      const bounds = L.latLngBounds([]);
-      const legend = document.getElementById("map-legend");
-
-      (payload.units || []).forEach((unit) => {
-        const style = UNIT_STYLES[unit.kind] || UNIT_STYLES.district;
-        if (unit.boundary && unit.boundary.coordinates) {
-          const layer = L.geoJSON(
-            { type: "Feature", properties: unit, geometry: unit.boundary },
-            {
-              style: () => ({
-                color: style.color,
-                weight: style.weight,
-                fillColor: style.color,
-                fillOpacity: style.fillOpacity,
-              }),
-              onEachFeature(feature, lyr) {
-                lyr.bindPopup(
-                  `<strong>${unit.kind_label}</strong><br>${unit.name}`
-                );
-              },
-            }
-          ).addTo(map);
-          bounds.extend(layer.getBounds());
-        } else if (unit.center_lat != null && unit.center_lng != null) {
-          bounds.extend([unit.center_lat, unit.center_lng]);
-        }
-
-        if (legend) {
-          const chip = document.createElement("span");
-          chip.className = "legend-chip";
-          chip.innerHTML = `<span class="legend-swatch" style="background:${style.color}"></span>${unit.kind_label}: ${unit.name}`;
-          legend.appendChild(chip);
-        }
-      });
-
-      const station = payload.station;
-      if (station && station.lat != null && station.lng != null) {
-        const marker = L.marker([station.lat, station.lng]).addTo(map);
-        marker.bindPopup(
-          `<strong>${station.name}</strong><br>${station.code}<br>${station.address}`
-        );
-        bounds.extend([station.lat, station.lng]);
-        marker.openPopup();
-      }
-
-      if (bounds.isValid()) {
-        map.fitBounds(bounds.pad(0.12));
-      } else {
-        map.setView([50.2649, 19.0238], 11);
-      }
-
-      setTimeout(() => map.invalidateSize(), 80);
-    },
-  };
-  window.SelectioResultsMap = {
-    init(mapEl) {
-      if (!mapEl || typeof L === "undefined") return;
-
-      let payload;
-      try {
-        const node = document.getElementById("results-map-payload");
-        payload = node ? JSON.parse(node.textContent) : {};
-      } catch (e) {
-        console.error("Results map payload parse error", e);
-        return;
-      }
-
-      const map = L.map(mapEl, {
-        scrollWheelZoom: false,
-        zoomControl: true,
-      });
-
-      L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
-        attribution:
-          '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
-        subdomains: "abcd",
-        maxZoom: 19,
-      }).addTo(map);
-
-      const bounds = L.latLngBounds([]);
-      const legend = document.getElementById("map-legend");
-      const selectedId = payload.selected_unit_id;
-      const base = payload.results_base || "/results/";
-
-      (payload.units || []).forEach((unit) => {
-        const style = UNIT_STYLES[unit.kind] || UNIT_STYLES.district;
-        const isSelected = selectedId != null && unit.id === selectedId;
-        const drawStyle = {
-          color: style.color,
-          weight: isSelected ? style.weight + 1.5 : style.weight,
-          fillColor: style.color,
-          fillOpacity: isSelected ? Math.min(style.fillOpacity + 0.18, 0.55) : style.fillOpacity,
-        };
-
-        const onClick = () => {
-          const url = new URL(base, window.location.origin);
-          url.searchParams.set("kind", unit.kind);
-          url.searchParams.set("unit", String(unit.id));
-          window.location.href = url.toString();
-        };
-
-        if (unit.boundary && unit.boundary.coordinates) {
-          const layer = L.geoJSON(
-            { type: "Feature", properties: unit, geometry: unit.boundary },
-            {
-              style: () => drawStyle,
-              onEachFeature(feature, lyr) {
-                lyr.on("click", onClick);
-                lyr.bindTooltip(
-                  `${unit.kind_label}: ${unit.name} (${unit.offices_count || 0} urz.)`,
-                  { sticky: true }
-                );
-              },
-            }
-          ).addTo(map);
-          bounds.extend(layer.getBounds());
-        } else if (unit.center_lat != null && unit.center_lng != null) {
-          const marker = L.circleMarker([unit.center_lat, unit.center_lng], {
-            radius: isSelected ? 10 : 7,
-            color: style.color,
-            fillColor: style.color,
-            fillOpacity: 0.7,
-          }).addTo(map);
-          marker.on("click", onClick);
-          bounds.extend([unit.center_lat, unit.center_lng]);
-        }
-
-        if (legend) {
-          const chip = document.createElement("button");
-          chip.type = "button";
-          chip.className = "legend-chip legend-chip-btn" + (isSelected ? " is-active" : "");
-          chip.innerHTML = `<span class="legend-swatch" style="background:${style.color}"></span>${unit.name}`;
-          chip.addEventListener("click", onClick);
-          legend.appendChild(chip);
-        }
-      });
-
-      if (bounds.isValid()) {
-        map.fitBounds(bounds.pad(0.15));
-      } else {
-        map.setView([52.1, 19.4], 6);
-      }
-      setTimeout(() => map.invalidateSize(), 80);
-    },
-  };
 })();
