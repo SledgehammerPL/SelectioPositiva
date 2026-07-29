@@ -132,7 +132,7 @@
           </thead>
           <tbody>
             {% for row in elected_rows %}
-            <tr class="is-winner">
+            <tr class="is-winner js-candidate-tip" data-id="{{ row.user_id }}">
               <td>{{ row.place }}{% if row.is_tied_at_threshold %}*{% endif %}</td>
               <td>{{ row.name }}</td>
               <td>{{ row.first_preferences }}</td>
@@ -160,7 +160,7 @@
           </thead>
           <tbody>
             {% for row in remaining_rows %}
-            <tr>
+            <tr class="js-candidate-tip" data-id="{{ row.user_id }}">
               <td>{{ row.place }}{% if row.is_tied_at_threshold %}*{% endif %}</td>
               <td>{{ row.name }}</td>
               <td>{{ row.first_preferences }}</td>
@@ -210,37 +210,78 @@
     {% endif %}
   </div>
 </section>
+
+{% if elected_rows or remaining_rows %}
+{{ elected_rows|json_script:"results-elected-data" }}
+{{ remaining_rows|json_script:"results-remaining-data" }}
+<div
+  id="candidate-tooltip"
+  class="candidate-tooltip"
+  hidden
+  role="tooltip"
+  aria-hidden="true"
+>
+  <div class="candidate-tooltip-card">
+    <div class="candidate-tooltip-photo" aria-hidden="true">
+      <div class="candidate-tooltip-photo-mock">Brak zdjęcia</div>
+    </div>
+    <div class="candidate-tooltip-content">
+      <div class="candidate-tooltip-name"></div>
+      <div class="candidate-tooltip-meta"></div>
+    </div>
+  </div>
+</div>
+{% endif %}
 {% endblock %}
 
 {% block extra_js %}
 <script>
   document.addEventListener('DOMContentLoaded', () => {
     const form = document.getElementById('results-filter-form');
-    if (!form) return;
-    const country = document.getElementById('results-country');
-    const voi = document.getElementById('results-voivodeship');
-    const county = document.getElementById('results-county');
-    const muni = document.getElementById('results-municipality');
+    if (form) {
+      const country = document.getElementById('results-country');
+      const voi = document.getElementById('results-voivodeship');
+      const county = document.getElementById('results-county');
+      const muni = document.getElementById('results-municipality');
 
-    const submitCleared = (keep) => {
-      // Czyść głębsze poziomy przy zmianie nadrzędnego.
-      if (!keep.voi && voi) voi.value = '';
-      if (!keep.county && county) county.value = '';
-      if (!keep.muni && muni) muni.value = '';
-      form.submit();
-    };
+      const submitCleared = (keep) => {
+        if (!keep.voi && voi) voi.value = '';
+        if (!keep.county && county) county.value = '';
+        if (!keep.muni && muni) muni.value = '';
+        form.submit();
+      };
 
-    if (country) {
-      country.addEventListener('change', () => submitCleared({}));
+      if (country) country.addEventListener('change', () => submitCleared({}));
+      if (voi) voi.addEventListener('change', () => submitCleared({ voi: true }));
+      if (county) {
+        county.addEventListener('change', () => submitCleared({ voi: true, county: true }));
+      }
+      if (muni) muni.addEventListener('change', () => form.submit());
     }
-    if (voi) {
-      voi.addEventListener('change', () => submitCleared({ voi: true }));
-    }
-    if (county) {
-      county.addEventListener('change', () => submitCleared({ voi: true, county: true }));
-    }
-    if (muni) {
-      muni.addEventListener('change', () => form.submit());
+
+    if (window.SelectioCandidateTooltip) {
+      const byId = {};
+      ['results-elected-data', 'results-remaining-data'].forEach((id) => {
+        const node = document.getElementById(id);
+        if (!node) return;
+        JSON.parse(node.textContent).forEach((row) => {
+          if (row.user_id == null) return;
+          byId[String(row.user_id)] = {
+            id: row.user_id,
+            name: row.name || '',
+            birth_date: row.birth_date || null,
+            municipality: row.municipality || null,
+          };
+        });
+      });
+      const panel = document.querySelector('.results-main');
+      if (panel && Object.keys(byId).length) {
+        window.SelectioCandidateTooltip.init({
+          byId,
+          gap: 22,
+          roots: [{ root: panel, itemSelector: '.js-candidate-tip' }],
+        });
+      }
     }
   });
 </script>

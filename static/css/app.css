@@ -1014,6 +1014,15 @@ h2 {
   animation: rise 0.5s ease both;
 }
 
+.results-table tbody tr.js-candidate-tip {
+  cursor: default;
+}
+
+.results-table tbody tr.js-candidate-tip:hover {
+  background: rgba(31, 111, 74, 0.06);
+}
+
+
 .turnout-card {
   display: grid;
   grid-template-columns: 1fr auto;

@@ -104,7 +104,13 @@ def build_result_payload(
     user_ids = result.candidate_ids
     users = {
         u.pk: u
-        for u in User.objects.filter(pk__in=user_ids).select_related("voter_profile")
+        for u in User.objects.filter(pk__in=user_ids).select_related(
+            "voter_profile",
+            "voter_profile__territorial_unit",
+            "voter_profile__territorial_unit__parent",
+            "voter_profile__territorial_unit__parent__parent",
+            "voter_profile__territorial_unit__parent__parent__parent",
+        )
     }
 
     def user_label(uid: int) -> str:
@@ -116,6 +122,18 @@ def build_result_payload(
         except Exception:
             full = f"{u.first_name} {u.last_name}".strip()
             return full or u.email or str(uid)
+
+    def user_tooltip(uid: int) -> dict[str, Any]:
+        u = users.get(uid)
+        if u is None:
+            return {"birth_date": None, "municipality": None}
+        try:
+            profile = u.voter_profile
+        except Exception:
+            return {"birth_date": None, "municipality": None}
+        birth = str(profile.birth_date) if profile.birth_date else None
+        municipality = profile.residence_municipality_name()
+        return {"birth_date": birth, "municipality": municipality}
 
     eligible = eligible_voter_count(district)
     ballots = result.ballot_count
@@ -130,10 +148,13 @@ def build_result_payload(
             status = "Wybrany"
         else:
             status = "Nieobsadzony"
+        tip = user_tooltip(uid)
         ranking_rows.append(
             {
                 "user_id": uid,
                 "name": user_label(uid),
+                "birth_date": tip["birth_date"],
+                "municipality": tip["municipality"],
                 "place": row.place,
                 "schulze_wins": row.schulze_wins,
                 "first_preferences": row.first_preferences,

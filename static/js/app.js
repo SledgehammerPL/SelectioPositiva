@@ -10,6 +10,103 @@
     });
   }
 
+  window.SelectioCandidateTooltip = {
+    init(opts) {
+      const tooltipEl =
+        opts.tooltipEl || document.getElementById("candidate-tooltip");
+      if (!tooltipEl) return null;
+
+      const nameEl = tooltipEl.querySelector(".candidate-tooltip-name");
+      const metaEl = tooltipEl.querySelector(".candidate-tooltip-meta");
+      const byId = opts.byId || {};
+      const gap = opts.gap != null ? opts.gap : 22;
+      const pad = 8;
+      let hoverId = null;
+
+      function hide() {
+        hoverId = null;
+        tooltipEl.hidden = true;
+        tooltipEl.setAttribute("aria-hidden", "true");
+      }
+
+      function render(c) {
+        if (!nameEl || !metaEl || !c) return;
+        nameEl.textContent = c.name || "";
+        const parts = [];
+        if (c.birth_date) parts.push("ur. " + c.birth_date);
+        if (c.municipality) parts.push("zam. " + c.municipality);
+        metaEl.textContent = parts.length
+          ? parts.join(" · ")
+          : "Szczegóły chwilowo niedostępne";
+      }
+
+      function move(clientX, clientY) {
+        if (tooltipEl.hidden) return;
+        const rect = tooltipEl.getBoundingClientRect();
+        // Odstęp od kursora — nie nachodzi na uchwyt przeciągania.
+        let left = clientX - rect.width - gap;
+        let top = clientY + gap;
+        if (left < pad) left = clientX + gap;
+        if (top + rect.height > window.innerHeight - pad) {
+          top = clientY - rect.height - gap;
+        }
+        left = Math.max(
+          pad,
+          Math.min(left, window.innerWidth - rect.width - pad)
+        );
+        top = Math.max(
+          pad,
+          Math.min(top, window.innerHeight - rect.height - pad)
+        );
+        tooltipEl.style.left = left + "px";
+        tooltipEl.style.top = top + "px";
+      }
+
+      function show(id, clientX, clientY) {
+        const c = byId[String(id)];
+        if (!c) return;
+        hoverId = String(id);
+        render(c);
+        tooltipEl.hidden = false;
+        tooltipEl.setAttribute("aria-hidden", "false");
+        move(clientX, clientY);
+      }
+
+      function bindRoot(root, itemSelector, skipSelector) {
+        if (!root) return;
+        root.addEventListener("mouseover", (e) => {
+          if (skipSelector && e.target.closest(skipSelector)) {
+            hide();
+            return;
+          }
+          const item = e.target.closest(itemSelector);
+          if (!item || !root.contains(item)) return;
+          const id = item.dataset.id;
+          if (!id) return;
+          if (hoverId !== String(id)) show(id, e.clientX, e.clientY);
+          else move(e.clientX, e.clientY);
+        });
+        root.addEventListener("mousemove", (e) => {
+          if (skipSelector && e.target.closest(skipSelector)) {
+            hide();
+            return;
+          }
+          if (hoverId) move(e.clientX, e.clientY);
+        });
+        root.addEventListener("mouseleave", () => hide());
+        root.addEventListener("mousedown", (e) => {
+          if (skipSelector && e.target.closest(skipSelector)) hide();
+        });
+      }
+
+      (opts.roots || []).forEach((cfg) => {
+        bindRoot(cfg.root, cfg.itemSelector, cfg.skipSelector);
+      });
+
+      return { hide, show, byId };
+    },
+  };
+
   window.SelectioRanking = {
     init(listEl) {
       if (!listEl || typeof Sortable === "undefined") return;
@@ -44,73 +141,24 @@
       let requestSeq = 0;
       let activeIndex = -1;
 
-      const tooltipEl = document.getElementById("candidate-tooltip");
-      let hoverTooltipId = null;
-      const tooltipNameEl = tooltipEl
-        ? tooltipEl.querySelector(".candidate-tooltip-name")
-        : null;
-      const tooltipMetaEl = tooltipEl
-        ? tooltipEl.querySelector(".candidate-tooltip-meta")
-        : null;
-
-      function hideTooltip() {
-        if (!tooltipEl) return;
-        hoverTooltipId = null;
-        tooltipEl.hidden = true;
-        tooltipEl.setAttribute("aria-hidden", "true");
-      }
-
-      function renderTooltipContent(c) {
-        if (!tooltipEl || !tooltipNameEl || !tooltipMetaEl || !c) return;
-        tooltipNameEl.textContent = c.name || "";
-
-        const parts = [];
-        if (c.birth_date) parts.push("ur. " + c.birth_date);
-        if (c.municipality) parts.push("zam. " + c.municipality);
-        tooltipMetaEl.textContent =
-          parts.length ? parts.join(" · ") : "Szczegóły chwilowo niedostępne";
-      }
-
-      function moveTooltip(clientX, clientY) {
-        if (!tooltipEl || tooltipEl.hidden) return;
-        const rect = tooltipEl.getBoundingClientRect();
-        const pad = 8;
-        const gap = 10;
-        // Preferuj lewą stronę kursora (bliżej, nie wychodzi poza prawą krawędź).
-        let left = clientX - rect.width - gap;
-        let top = clientY + gap;
-        if (left < pad) {
-          left = clientX + gap;
-        }
-        if (top + rect.height > window.innerHeight - pad) {
-          top = clientY - rect.height - gap;
-        }
-        left = Math.max(
-          pad,
-          Math.min(left, window.innerWidth - rect.width - pad)
-        );
-        top = Math.max(
-          pad,
-          Math.min(top, window.innerHeight - rect.height - pad)
-        );
-        tooltipEl.style.left = left + "px";
-        tooltipEl.style.top = top + "px";
-      }
-
-      function showTooltipForId(id, clientX, clientY) {
-        if (!tooltipEl) return;
-        const c = byId[id];
-        if (!c) return;
-        hoverTooltipId = id;
-        renderTooltipContent(c);
-        tooltipEl.hidden = false;
-        tooltipEl.setAttribute("aria-hidden", "false");
-        moveTooltip(clientX, clientY);
-      }
-
       (opts.ranked || []).forEach((c) => {
         byId[String(c.id)] = c;
       });
+
+      const tipApi = window.SelectioCandidateTooltip
+        ? window.SelectioCandidateTooltip.init({
+            byId,
+            gap: 22,
+            roots: [
+              { root: pool, itemSelector: ".ac-option" },
+              {
+                root: rankList,
+                itemSelector: ".candidate-item",
+                skipSelector: ".drag-handle, .js-remove-rank",
+              },
+            ],
+          })
+        : null;
 
       const emptyRank = document.querySelector(".rank-empty-msg");
       const focusEl = lastEl || firstEl;
@@ -184,9 +232,7 @@
           span.textContent = metaBits.join(" · ");
           body.appendChild(span);
         }
-        li.querySelector('input[name="ranked_user_ids"]').value = String(
-          c.id
-        );
+        li.querySelector('input[name="ranked_user_ids"]').value = String(c.id);
         return li;
       }
 
@@ -204,9 +250,7 @@
         if (c.committee) metaBits.push(c.committee);
         li.innerHTML =
           '<span class="ac-option-name"></span>' +
-          (metaBits.length
-            ? '<span class="ac-option-meta"></span>'
-            : "") +
+          (metaBits.length ? '<span class="ac-option-meta"></span>' : "") +
           '<span class="ac-option-add" aria-hidden="true">Dodaj</span>';
         li.querySelector(".ac-option-name").textContent = c.name;
         const meta = li.querySelector(".ac-option-meta");
@@ -244,13 +288,17 @@
         pool.hidden = !open;
         setExpanded(open);
         if (!filterActive()) {
-          setStatus("Wpisz min. 3 znaki w dowolnym polu (albo datę) — kolejne pola zawężają.");
+          setStatus(
+            "Wpisz min. 3 znaki w dowolnym polu (albo datę) — kolejne pola zawężają."
+          );
           return;
         }
         if (visible === 0) {
           setStatus("Brak kandydatów spełniających kryteria.");
         } else {
-          setStatus("Podpowiedzi: " + visible + " — kliknij lub Enter, aby dodać.");
+          setStatus(
+            "Podpowiedzi: " + visible + " — kliknij lub Enter, aby dodać."
+          );
         }
       }
 
@@ -283,7 +331,9 @@
           pool.hidden = true;
           setExpanded(false);
           activeIndex = -1;
-          setStatus("Wpisz min. 3 znaki w dowolnym polu (albo datę) — kolejne pola zawężają.");
+          setStatus(
+            "Wpisz min. 3 znaki w dowolnym polu (albo datę) — kolejne pola zawężają."
+          );
           return;
         }
 
@@ -311,7 +361,9 @@
               pool.innerHTML = "";
               pool.hidden = true;
               setExpanded(false);
-              setStatus("Wpisz min. 3 znaki w dowolnym polu (albo datę) — kolejne pola zawężają.");
+              setStatus(
+                "Wpisz min. 3 znaki w dowolnym polu (albo datę) — kolejne pola zawężają."
+              );
               return;
             }
             renderResults(data.results || []);
@@ -334,27 +386,9 @@
         const item = e.target.closest(".ac-option");
         if (!item) return;
         e.preventDefault();
-        const c = byId[item.dataset.id];
-        addCandidate(c);
+        addCandidate(byId[item.dataset.id]);
+        if (tipApi) tipApi.hide();
       });
-
-      if (tooltipEl) {
-        pool.addEventListener("mouseover", (e) => {
-          const item = e.target.closest(".ac-option");
-          if (!item) return;
-          const id = item.dataset.id;
-          if (!id) return;
-          if (hoverTooltipId !== id && byId[id]) {
-            showTooltipForId(id, e.clientX, e.clientY);
-            return;
-          }
-          if (hoverTooltipId === id) moveTooltip(e.clientX, e.clientY);
-        });
-        pool.addEventListener("mousemove", (e) => {
-          if (hoverTooltipId) moveTooltip(e.clientX, e.clientY);
-        });
-        pool.addEventListener("mouseleave", () => hideTooltip());
-      }
 
       rankList.addEventListener("click", (e) => {
         const btn = e.target.closest(".js-remove-rank");
@@ -365,25 +399,8 @@
         renumber(rankList);
         syncEmpty();
         scheduleSearch();
+        if (tipApi) tipApi.hide();
       });
-
-      if (tooltipEl) {
-        rankList.addEventListener("mouseover", (e) => {
-          const item = e.target.closest(".candidate-item");
-          if (!item) return;
-          const id = item.dataset.id;
-          if (!id) return;
-          if (hoverTooltipId !== id && byId[id]) {
-            showTooltipForId(id, e.clientX, e.clientY);
-            return;
-          }
-          if (hoverTooltipId === id) moveTooltip(e.clientX, e.clientY);
-        });
-        rankList.addEventListener("mousemove", (e) => {
-          if (hoverTooltipId) moveTooltip(e.clientX, e.clientY);
-        });
-        rankList.addEventListener("mouseleave", () => hideTooltip());
-      }
 
       function onFilterKeydown(e) {
         const items = pool.querySelectorAll(".ac-option");
@@ -408,6 +425,7 @@
           pool.hidden = true;
           setExpanded(false);
           activeIndex = -1;
+          if (tipApi) tipApi.hide();
         }
       }
 
@@ -437,6 +455,9 @@
           draggable: ".candidate-item",
           ghostClass: "sortable-ghost",
           chosenClass: "sortable-chosen",
+          onStart() {
+            if (tipApi) tipApi.hide();
+          },
           onSort() {
             renumber(rankList);
           },
@@ -446,9 +467,10 @@
       syncEmpty();
       pool.hidden = true;
       setExpanded(false);
-      setStatus("Wpisz min. 3 znaki w dowolnym polu (albo datę) — kolejne pola zawężają.");
+      setStatus(
+        "Wpisz min. 3 znaki w dowolnym polu (albo datę) — kolejne pola zawężają."
+      );
       return { addCandidate };
     },
   };
-
 })();

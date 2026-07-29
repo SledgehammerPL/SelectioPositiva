@@ -442,6 +442,44 @@ def clear_ballot(request: HttpRequest, slug: str) -> HttpResponse:
     return redirect("dashboard")
 
 
+def _enrich_result_rows_tooltip(rows: list) -> list:
+    """Uzupełnia birth_date/municipality w wierszach wyników (stary cache też)."""
+    if not rows:
+        return rows
+    ids = [int(r["user_id"]) for r in rows if r.get("user_id") is not None]
+    if not ids:
+        return rows
+    users = {
+        u.pk: u
+        for u in User.objects.filter(pk__in=ids).select_related(
+            "voter_profile",
+            "voter_profile__territorial_unit",
+            "voter_profile__territorial_unit__parent",
+            "voter_profile__territorial_unit__parent__parent",
+            "voter_profile__territorial_unit__parent__parent__parent",
+        )
+    }
+    for row in rows:
+        uid = row.get("user_id")
+        if uid is None or row.get("birth_date") or row.get("municipality"):
+            # Jeśli którekolwiek pole jest już w cache — i tak uzupełnij braki.
+            pass
+        user = users.get(int(uid)) if uid is not None else None
+        if user is None:
+            continue
+        try:
+            profile = user.voter_profile
+        except Exception:
+            continue
+        if not row.get("birth_date") and profile.birth_date:
+            row["birth_date"] = str(profile.birth_date)
+        if not row.get("municipality"):
+            row["municipality"] = profile.residence_municipality_name()
+        if not row.get("name"):
+            row["name"] = profile.full_name()
+    return rows
+
+
 def results(request: HttpRequest) -> HttpResponse:
     """
     Publiczne wyniki Schulzego wg poziomu terytorialnego:
@@ -532,9 +570,15 @@ def results(request: HttpRequest) -> HttpResponse:
     if selected_district is not None:
         result_payload = get_cached_result(selected_district)
 
-    ranking_rows = (result_payload or {}).get("ranking") or []
-    elected_rows = (result_payload or {}).get("elected") or []
-    remaining_rows = (result_payload or {}).get("remaining") or []
+    ranking_rows = _enrich_result_rows_tooltip(
+        (result_payload or {}).get("ranking") or []
+    )
+    elected_rows = _enrich_result_rows_tooltip(
+        (result_payload or {}).get("elected") or []
+    )
+    remaining_rows = _enrich_result_rows_tooltip(
+        (result_payload or {}).get("remaining") or []
+    )
     turnout = (result_payload or {}).get("turnout") or {}
     pairwise = (result_payload or {}).get("schulze", {}).get("pairwise") or {}
     labels = (result_payload or {}).get("user_labels") or {}
