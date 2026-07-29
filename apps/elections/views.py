@@ -17,7 +17,6 @@ from django.views.decorators.http import require_GET, require_http_methods, requ
 from elections.forms import CandidateRequestForm
 from elections.models import (
     Ballot,
-    CandidateRequest,
     ElectoralDistrict,
     _ancestor_of_kind,
     unit_is_descendant_of_any,
@@ -30,6 +29,7 @@ from elections.services import (
     user_can_vote_on,
     vote_statuses_for_user,
 )
+from elections.services.candidate_requests import request_candidate_user
 from elections.services.eligibility import (
     district_units_at_level,
     user_age_on,
@@ -135,6 +135,7 @@ def _search_users_for_district(
         User.objects.filter(
             is_active=True,
             voter_profile__territorial_unit__isnull=False,
+            voter_profile__is_approved=True,
         )
         .select_related(
             "voter_profile",
@@ -307,7 +308,7 @@ def vote_district(request: HttpRequest, slug: str) -> HttpResponse:
 
     profile = get_voter_profile(request.user)
     can_self_nominate = False
-    if profile and profile.territorial_unit_id:
+    if profile and profile.is_approved and profile.territorial_unit_id:
         can_self_nominate = user_may_run_in_district(
             profile.territorial_unit, district
         )
@@ -347,36 +348,33 @@ def request_candidate(request: HttpRequest, slug: str) -> HttpResponse:
 
     form = CandidateRequestForm(request.POST)
     if not form.is_valid():
-        messages.error(request, "Sprawdź dane prośby o kandydata.")
+        messages.error(request, "Sprawdź dane zgłoszenia kandydata.")
         return redirect("vote_district", slug=district.slug)
 
-    pending = CandidateRequest.objects.filter(
-        district=district,
+    user, created = request_candidate_user(
         requested_by=request.user,
-        first_name__iexact=form.cleaned_data["first_name"].strip(),
-        last_name__iexact=form.cleaned_data["last_name"].strip(),
-        birth_date=form.cleaned_data["birth_date"],
-        status=CandidateRequest.Status.PENDING,
-    ).exists()
-    if pending:
-        messages.info(
-            request,
-            "Taka prośba już oczekuje na rozpatrzenie przez administratora.",
-        )
-        return redirect("vote_district", slug=district.slug)
-
-    CandidateRequest.objects.create(
-        district=district,
-        requested_by=request.user,
-        first_name=form.cleaned_data["first_name"].strip(),
-        last_name=form.cleaned_data["last_name"].strip(),
+        first_name=form.cleaned_data["first_name"],
+        last_name=form.cleaned_data["last_name"],
         birth_date=form.cleaned_data["birth_date"],
         note=form.cleaned_data.get("note") or "",
     )
-    messages.success(
-        request,
-        "Wysłano prośbę o dodanie kandydata. Administrator rozpatrzy zgłoszenie.",
-    )
+    profile = getattr(user, "voter_profile", None)
+    if profile is not None and profile.is_approved:
+        messages.info(
+            request,
+            "Ta osoba jest już w systemie — możesz ją wyszukać i dodać do rankingu.",
+        )
+    elif created:
+        messages.success(
+            request,
+            "Zgłoszono kandydata. Po zatwierdzeniu przez administratora "
+            "pojawi się w wyszukiwaniu.",
+        )
+    else:
+        messages.info(
+            request,
+            "Takie zgłoszenie już istnieje i czeka na zatwierdzenie przez administratora.",
+        )
     return redirect("vote_district", slug=district.slug)
 
 

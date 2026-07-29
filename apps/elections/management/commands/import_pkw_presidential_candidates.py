@@ -153,6 +153,7 @@ class Command(BaseCommand):
                 last_name=cand.last_name,
                 birth_date=birth_date,
                 territorial_unit=unit,
+                is_approved=True,
             )
             if user.has_usable_password():
                 user.set_unusable_password()

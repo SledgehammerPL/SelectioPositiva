@@ -194,6 +194,7 @@ class Command(BaseCommand):
                 last_name=last_name,
                 birth_date=birth_date,
                 territorial_unit=st.precinct,
+                is_approved=True,
             )
 
         ensure_user(
@@ -204,6 +205,7 @@ class Command(BaseCommand):
             last_name="Wyborcza",
             birth_date=date(1990, 5, 12),
             territorial_unit=station.precinct,
+            is_approved=True,
         )
 
         self.stdout.write(self.style.SUCCESS("Seed demo OK (bez geografii demo)."))

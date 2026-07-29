@@ -1,39 +1,69 @@
-"""Zatwierdzanie próśb o kandydatów."""
+"""Zgłoszenia kandydatów jako niezatwierdzone profile użytkowników."""
 
 from __future__ import annotations
+
+from datetime import date
 
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.utils import timezone
 
-from elections.models import CandidateRequest, VoterProfile
+from elections.models import VoterProfile
 
 User = get_user_model()
 
 
 @transaction.atomic
-def approve_candidate_request(
-    request_obj: CandidateRequest,
+def request_candidate_user(
     *,
-    reviewer,
-) -> User:
+    requested_by,
+    first_name: str,
+    last_name: str,
+    birth_date: date,
+    note: str = "",
+) -> tuple[User, bool]:
     """
-    Tworzy konto kandydata (User + VoterProfile) i oznacza prośbę jako zatwierdzoną.
-    Obwód bierze z profilu zgłaszającego — admin może potem poprawić.
-    """
-    if request_obj.status == CandidateRequest.Status.APPROVED and request_obj.created_user_id:
-        return request_obj.created_user
+    Tworzy (lub znajduje) użytkownika ze zgłoszenia.
 
-    precinct = None
-    try:
-        precinct = request_obj.requested_by.voter_profile.territorial_unit
-    except VoterProfile.DoesNotExist:
-        precinct = None
+    Zwraca (user, created). Nowy profil jest niezatwierdzony;
+    admin uzupełnia dane i zatwierdza.
+    """
+    first = (first_name or "").strip()
+    last = (last_name or "").strip()
+    note = (note or "").strip()
+
+    existing = (
+        User.objects.filter(
+            first_name__iexact=first,
+            last_name__iexact=last,
+            voter_profile__birth_date=birth_date,
+        )
+        .select_related("voter_profile")
+        .order_by("id")
+        .first()
+    )
+    if existing is not None:
+        profile = getattr(existing, "voter_profile", None)
+        if profile is None:
+            profile = VoterProfile.objects.create(
+                user=existing,
+                birth_date=birth_date,
+                is_approved=False,
+                requested_by=requested_by,
+                request_note=note,
+            )
+            return existing, True
+        if not profile.is_approved and note and not profile.request_note:
+            profile.request_note = note
+            if profile.requested_by_id is None:
+                profile.requested_by = requested_by
+            profile.save(update_fields=["request_note", "requested_by"])
+        return existing, False
 
     user = User(
-        username=f"_tmp_req_{request_obj.pk}",
-        first_name=request_obj.first_name.strip(),
-        last_name=request_obj.last_name.strip(),
+        username=f"_tmp_req_{requested_by.pk}_{timezone.now().timestamp():.0f}",
+        first_name=first,
+        last_name=last,
         email="",
         is_active=True,
     )
@@ -42,46 +72,25 @@ def approve_candidate_request(
     user.username = f"u{user.pk}"
     user.save(update_fields=["username"])
 
+    precinct = None
+    try:
+        precinct = requested_by.voter_profile.territorial_unit
+    except VoterProfile.DoesNotExist:
+        precinct = None
+
     VoterProfile.objects.create(
         user=user,
-        birth_date=request_obj.birth_date,
+        birth_date=birth_date,
         territorial_unit=precinct,
+        is_approved=False,
+        requested_by=requested_by,
+        request_note=note,
     )
-
-    request_obj.status = CandidateRequest.Status.APPROVED
-    request_obj.created_user = user
-    request_obj.reviewed_by = reviewer
-    request_obj.reviewed_at = timezone.now()
-    request_obj.save(
-        update_fields=[
-            "status",
-            "created_user",
-            "reviewed_by",
-            "reviewed_at",
-            "updated_at",
-        ]
-    )
-    return user
+    return user, True
 
 
 @transaction.atomic
-def reject_candidate_request(
-    request_obj: CandidateRequest,
-    *,
-    reviewer,
-    admin_note: str = "",
-) -> None:
-    request_obj.status = CandidateRequest.Status.REJECTED
-    request_obj.reviewed_by = reviewer
-    request_obj.reviewed_at = timezone.now()
-    if admin_note:
-        request_obj.admin_note = admin_note
-    request_obj.save(
-        update_fields=[
-            "status",
-            "reviewed_by",
-            "reviewed_at",
-            "admin_note",
-            "updated_at",
-        ]
-    )
+def approve_voter_profile(profile: VoterProfile, *, reviewer) -> VoterProfile:
+    """Admin zatwierdza zgłoszony profil."""
+    profile.approve(by_user=reviewer)
+    return profile

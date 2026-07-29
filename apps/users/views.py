@@ -360,7 +360,7 @@ def profile(request: HttpRequest) -> HttpResponse:
             data_form = ProfileDataForm(request.user, request.POST)
             if data_form.is_valid():
                 data_form.save()
-                messages.success(request, "Zapisano dane profilu.")
+                messages.success(request, "Zapisano i zatwierdzono dane profilu.")
                 return redirect("profile")
 
     return render(

@@ -27,6 +27,7 @@ def ensure_user(
     birth_date: date | None = None,
     territorial_unit=None,
     is_staff: bool = False,
+    is_approved: bool = False,
 ) -> User:
     """
     Znajduje użytkownika po emailu, potem po tożsamości
@@ -58,7 +59,10 @@ def ensure_user(
         if password:
             user.set_password(password)
             user.save(update_fields=["password"])
-        profile, _ = VoterProfile.objects.get_or_create(user=user)
+        profile, _ = VoterProfile.objects.get_or_create(
+            user=user,
+            defaults={"is_approved": is_approved},
+        )
         updates = {}
         if second_name and profile.second_name != second_name:
             updates["second_name"] = second_name
@@ -66,6 +70,8 @@ def ensure_user(
             updates["birth_date"] = birth_date
         if territorial_unit is not None:
             updates["territorial_unit"] = territorial_unit
+        if is_approved and not profile.is_approved:
+            updates["is_approved"] = True
         if updates:
             for key, value in updates.items():
                 setattr(profile, key, value)
@@ -92,5 +98,6 @@ def ensure_user(
         second_name=second_name or "",
         birth_date=birth_date,
         territorial_unit=territorial_unit,
+        is_approved=is_approved,
     )
     return user

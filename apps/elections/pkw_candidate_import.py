@@ -114,6 +114,9 @@ def _apply_profile_updates(
     if birth_date is not None and profile.birth_date != birth_date:
         profile.birth_date = birth_date
         updates = True
+    if not profile.is_approved:
+        profile.is_approved = True
+        updates = True
     return updates
 
 
@@ -142,7 +145,10 @@ def _flush_creates(
             user = existing[key]
             profile = profiles_by_user_id.get(user.pk)
             if profile is None:
-                profile, _ = VoterProfile.objects.get_or_create(user=user)
+                profile, _ = VoterProfile.objects.get_or_create(
+                    user=user,
+                    defaults={"is_approved": True},
+                )
                 profiles_by_user_id[user.pk] = profile
             to_reuse.append({**r, "user": user, "profile": profile})
             continue
@@ -203,6 +209,7 @@ def _flush_creates(
             second_name=r["second_name"] or "",
             birth_date=r.get("birth_date"),
             territorial_unit=r["unit"],
+            is_approved=True,
         )
         profiles.append(profile)
         profiles_by_user_id[user.pk] = profile
@@ -249,7 +256,7 @@ def _flush_updates(rows: list[dict]) -> int:
     if profiles_to_save:
         VoterProfile.objects.bulk_update(
             profiles_to_save,
-            ["second_name", "territorial_unit", "birth_date"],
+            ["second_name", "territorial_unit", "birth_date", "is_approved"],
             batch_size=BATCH_SIZE,
         )
     return len(rows)
@@ -357,7 +364,10 @@ def import_candidates_batch(
         else:
             profile = profiles_by_user_id.get(user.pk)
             if profile is None:
-                profile, _ = VoterProfile.objects.get_or_create(user=user)
+                profile, _ = VoterProfile.objects.get_or_create(
+                    user=user,
+                    defaults={"is_approved": True},
+                )
                 profiles_by_user_id[user.pk] = profile
             update_batch.append({**row, "user": user, "profile": profile})
             if via_identity:

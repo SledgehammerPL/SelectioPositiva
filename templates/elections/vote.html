@@ -61,7 +61,7 @@
       {% endif %}
       <button type="button" class="btn btn-ghost btn-sm" id="btn-request-candidate"
               aria-expanded="false" aria-controls="candidate-request-panel">
-        Poproś o kandydata
+        Zgłoś kandydata
       </button>
     </div>
     <p class="ac-status" id="candidate-search-status" aria-live="polite">
@@ -89,10 +89,10 @@
   </div>
 
   <section class="candidate-request-panel" id="candidate-request-panel" hidden>
-    <h2>Poproś o dodanie kandydata</h2>
+    <h2>Zgłoś kandydata</h2>
     <p class="hint">
-      Jeśli osoby nie ma w systemie, wyślij prośbę. Administrator utworzy konto,
-      a potem będziesz mógł dodać ją do rankingu.
+      Jeśli osoby nie ma w wyszukiwaniu, zgłoś ją tutaj. Utworzymy niezatwierdzony profil —
+      administrator uzupełni dane i zatwierdzi, wtedy pojawi się w rankingach.
     </p>
     <form method="post" action="{% url 'request_candidate' district.slug %}" class="candidate-request-form">
       {% csrf_token %}
@@ -115,7 +115,7 @@
         {{ candidate_request_form.note }}
       </label>
       <div class="form-actions">
-        <button type="submit" class="btn btn-primary">Wyślij prośbę</button>
+        <button type="submit" class="btn btn-primary">Zgłoś kandydata</button>
         <button type="button" class="btn btn-ghost" id="btn-cancel-request">Anuluj</button>
       </div>
     </form>

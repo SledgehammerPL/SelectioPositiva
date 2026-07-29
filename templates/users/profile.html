@@ -8,12 +8,18 @@
   <h1>Profil</h1>
   <p class="lede">
     Email konta: <strong>{{ user.email }}</strong>.
-    Uzupełnij dane osobowe i ewentualnie zmień hasło.
+    Uzupełnij i zatwierdź dane osobowe — dopiero wtedy możesz startować w rankingach
+    i zgłaszać siebie jako kandydata. Nowi użytkownicy są domyślnie niezatwierdzeni.
   </p>
 
   <div class="profile-grid">
     <section class="profile-card">
       <h2>Dane osobowe</h2>
+      {% if profile and profile.is_approved %}
+      <p class="hint">Profil zatwierdzony{% if profile.approved_at %} ({{ profile.approved_at|date:"d.m.Y H:i" }}){% endif %}.</p>
+      {% else %}
+      <p class="hint">Profil niezatwierdzony — zapisz poprawne dane, aby zatwierdzić siebie.</p>
+      {% endif %}
       <form method="post" class="auth-form profile-form" novalidate>
         {% csrf_token %}
         <input type="hidden" name="action" value="profile">
@@ -48,7 +54,7 @@
           <span class="field-error">{{ data_form.birth_date.errors.0 }}</span>
           {% endif %}
         </label>
-        <button type="submit" class="btn btn-primary">Zapisz dane</button>
+        <button type="submit" class="btn btn-primary">Zapisz i zatwierdź dane</button>
       </form>
     </section>
 

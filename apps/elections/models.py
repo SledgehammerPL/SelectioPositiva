@@ -47,6 +47,39 @@ class VoterProfile(models.Model):
         default="",
         help_text="Opcjonalne drugie imię.",
     )
+    is_approved = models.BooleanField(
+        "zatwierdzony",
+        default=False,
+        db_index=True,
+        help_text=(
+            "Czy profil jest zatwierdzony do rankingów. "
+            "Użytkownik zatwierdza siebie w profilu; "
+            "admin zatwierdza osoby zgłoszone przez innych."
+        ),
+    )
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="requested_candidate_profiles",
+        verbose_name="zgłoszony przez",
+        help_text="Ustawiane, gdy ktoś inny poprosił o dodanie tej osoby.",
+    )
+    request_note = models.TextField(
+        "uwaga ze zgłoszenia",
+        blank=True,
+        default="",
+    )
+    approved_at = models.DateTimeField("zatwierdzono", null=True, blank=True)
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="approved_voter_profiles",
+        verbose_name="zatwierdził",
+    )
 
     class Meta:
         verbose_name = "profil wyborcy"
@@ -84,6 +117,17 @@ class VoterProfile(models.Model):
     def effective_unit(self) -> TerritorialUnit | None:
         """Węzeł używany do wyznaczania uprawnień."""
         return self.territorial_unit
+
+    def approve(self, *, by_user=None) -> None:
+        """Oznacza profil jako zatwierdzony."""
+        from django.utils import timezone
+
+        if self.is_approved and self.approved_at is not None:
+            return
+        self.is_approved = True
+        self.approved_at = timezone.now()
+        self.approved_by = by_user
+        self.save(update_fields=["is_approved", "approved_at", "approved_by"])
 
 
 class Party(models.Model):
@@ -348,69 +392,3 @@ class ElectionResultCache(models.Model):
     def __str__(self) -> str:
         state = "stale" if self.is_stale else "fresh"
         return f"Wynik {self.district} ({state})"
-
-
-class CandidateRequest(models.Model):
-    """
-    Prośba wyborcy o dodanie osoby, której nie ma jeszcze w systemie.
-
-    Wyborca może samodzielnie pojawić się w rankingu (jako zarejestrowany
-    użytkownik). Inne osoby dodaje admin po zatwierdzeniu tej prośby.
-    """
-
-    class Status(models.TextChoices):
-        PENDING = "pending", "Oczekująca"
-        APPROVED = "approved", "Zatwierdzona"
-        REJECTED = "rejected", "Odrzucona"
-
-    district = models.ForeignKey(
-        ElectoralDistrict,
-        on_delete=models.CASCADE,
-        related_name="candidate_requests",
-        verbose_name="okręg",
-    )
-    requested_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name="candidate_requests",
-        verbose_name="zgłaszający",
-    )
-    first_name = models.CharField("imię", max_length=150)
-    last_name = models.CharField("nazwisko", max_length=150)
-    birth_date = models.DateField("data urodzenia")
-    note = models.TextField("uwaga dla admina", blank=True)
-    status = models.CharField(
-        "status",
-        max_length=16,
-        choices=Status.choices,
-        default=Status.PENDING,
-        db_index=True,
-    )
-    admin_note = models.TextField("notatka admina", blank=True)
-    reviewed_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="reviewed_candidate_requests",
-        verbose_name="rozpatrzył",
-    )
-    reviewed_at = models.DateTimeField("rozpatrzono", null=True, blank=True)
-    created_user = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="created_from_candidate_requests",
-        verbose_name="utworzony użytkownik",
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        verbose_name = "prośba o kandydata"
-        verbose_name_plural = "prośby o kandydatów"
-        ordering = ["-created_at"]
-
-    def __str__(self) -> str:
-        return f"{self.first_name} {self.last_name} ({self.get_status_display()})"

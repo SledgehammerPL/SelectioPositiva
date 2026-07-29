@@ -46,7 +46,7 @@ def register_user(*, email: str, password: str) -> User:
     user.username = f"u{user.pk}"
     user.save(update_fields=["username"])
 
-    VoterProfile.objects.create(user=user)
+    VoterProfile.objects.create(user=user, is_approved=False)
     return user
 
 

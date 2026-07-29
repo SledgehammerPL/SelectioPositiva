@@ -1,32 +1,42 @@
 from django import forms
 
-from elections.models import CandidateRequest
 
+class CandidateRequestForm(forms.Form):
+    first_name = forms.CharField(
+        label="Imię",
+        max_length=150,
+        widget=forms.TextInput(
+            attrs={"placeholder": "Imię", "autocomplete": "given-name"}
+        ),
+    )
+    last_name = forms.CharField(
+        label="Nazwisko",
+        max_length=150,
+        widget=forms.TextInput(
+            attrs={"placeholder": "Nazwisko", "autocomplete": "family-name"}
+        ),
+    )
+    birth_date = forms.DateField(
+        label="Data urodzenia",
+        input_formats=["%Y-%m-%d"],
+        widget=forms.DateInput(format="%Y-%m-%d", attrs={"type": "date"}),
+    )
+    note = forms.CharField(
+        label="Uwaga",
+        required=False,
+        widget=forms.Textarea(
+            attrs={
+                "rows": 3,
+                "placeholder": "Opcjonalnie: skąd znasz tę osobę, partia…",
+            }
+        ),
+    )
 
-class CandidateRequestForm(forms.ModelForm):
-    class Meta:
-        model = CandidateRequest
-        fields = ("first_name", "last_name", "birth_date", "note")
-        widgets = {
-            "first_name": forms.TextInput(
-                attrs={"placeholder": "Imię", "autocomplete": "given-name"}
-            ),
-            "last_name": forms.TextInput(
-                attrs={"placeholder": "Nazwisko", "autocomplete": "family-name"}
-            ),
-            "birth_date": forms.DateInput(attrs={"type": "date"}),
-            "note": forms.Textarea(
-                attrs={
-                    "rows": 3,
-                    "placeholder": "Opcjonalnie: skąd znasz tę osobę, partia…",
-                }
-            ),
-        }
+    def clean_first_name(self) -> str:
+        return (self.cleaned_data.get("first_name") or "").strip()
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.fields["first_name"].label = "Imię"
-        self.fields["last_name"].label = "Nazwisko"
-        self.fields["birth_date"].label = "Data urodzenia"
-        self.fields["note"].label = "Uwaga"
-        self.fields["note"].required = False
+    def clean_last_name(self) -> str:
+        return (self.cleaned_data.get("last_name") or "").strip()
+
+    def clean_note(self) -> str:
+        return (self.cleaned_data.get("note") or "").strip()

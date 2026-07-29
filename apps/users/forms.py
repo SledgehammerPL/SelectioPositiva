@@ -200,6 +200,8 @@ class ProfileDataForm(forms.Form):
         profile.second_name = self.cleaned_data.get("second_name") or ""
         profile.birth_date = self.cleaned_data["birth_date"]
         profile.save(update_fields=["second_name", "birth_date"])
+        # Użytkownik zatwierdza własne dane osobowe.
+        profile.approve(by_user=user)
 
 
 class ProfilePasswordChangeForm(PasswordChangeForm):
